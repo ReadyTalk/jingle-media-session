@@ -589,8 +589,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         var newDesc = this.pc.remoteDescription;
         this.pc.remoteDescription.contents.forEach(function (content, idx) {
             var desc = content.application;
-            var ssrcs = desc.sources || [];
-            var groups = desc.sourceGroups || [];
+            var ssrcs = desc && desc.sources || [];
+            var groups = desc && desc.sourceGroups || [];
 
             if (!changes.contents) {
                 return;
@@ -625,8 +625,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         var newDesc = this.pc.remoteDescription;
         this.pc.remoteDescription.contents.forEach(function (content, idx) {
             var desc = content.application;
-            var ssrcs = desc.sources || [];
-            var groups = desc.sourceGroups || [];
+            var ssrcs = desc && desc.sources || [];
+            var groups = desc && desc.sourceGroups || [];
 
             changes.contents.forEach(function (newContent) {
                 if (content.name !== newContent.name) {
