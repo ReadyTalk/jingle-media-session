@@ -49,6 +49,17 @@ function filterUnusedLabels(content) {
     });
 }
 
+function filterRecvonly(content) {
+    if (!content.application) return;
+
+    // remove sources that are missing an msid (they are recvonly)
+    var sources = content.application.sources || [];
+    content.application.sources = sources.filter(function (source) {
+        // recvonly sources only have a cname
+        return source.parameters.length >= 2;
+    });
+}
+
 
 function MediaSession(opts) {
     BaseSession.call(this, opts);
@@ -261,6 +272,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             answer.jingle.contents.forEach(filterUnusedLabels);
+            answer.jingle.contents.forEach(filterRecvonly);
 
             self.send('session-accept', answer.jingle);
 
