@@ -61,6 +61,19 @@ function filterOutRecvonly(content) {
 }
 
 
+function changeSendersIfNoMsids(content) {
+    if (!content.application) return;
+
+    // remove sources that are missing an msid (they are recvonly)
+    var sources = content.application.sources || [];
+    const hasSourcesWithMsids = sources.some(function (source) {
+        return source.parameters.some(function(param) { return param.key === 'msid' });
+    });
+    if (!hasSourcesWithMsids) {
+        content.senders = "both";
+    }
+}
+
 function filterToMatchingRecvonly(oldContent, newContent) {
     if (oldContent.application.applicationType !== 'rtp') {
         return;
@@ -104,7 +117,6 @@ function filterToMatchingRecvonly(oldContent, newContent) {
             return found;
         });
     }
-    console.log('***old, new in filter funct', oldContent, newContent);
     return foundSource;
 }
 
@@ -319,7 +331,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             answer.jingle.contents.forEach(filterUnusedLabels);
+            // this isn't needed because we are signaling a source-remove and then source-add when adding a stream
             // answer.jingle.contents.forEach(filterOutRecvonly);
+            answer.jingle.contents.forEach(changeSendersIfNoMsids);
 
             self.send('session-accept', answer.jingle);
 
@@ -472,7 +486,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
         });
         delete desc.groups;
-        console.log('***contents for src-remove', desc.contents);
         if (desc.contents.length > 0) {
             this.send('source-remove', desc);
         }
