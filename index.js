@@ -55,8 +55,8 @@ function filterOutRecvonly(content) {
     // remove sources that are missing an msid (they are recvonly)
     var sources = content.application.sources || [];
     content.application.sources = sources.filter(function (source) {
-        // recvonly sources only have a cname
-        return source.parameters.length >= 2;
+        // recvonly sources won't have an msid, only a cname
+        return sourceHasMsid(source);
     });
 }
 
@@ -66,36 +66,40 @@ function changeSendersIfNoMsids(content) {
 
     // remove sources that are missing an msid (they are recvonly)
     var sources = content.application.sources || [];
-    const hasSourcesWithMsids = sources.some(function (source) {
-        return source.parameters.some(function(param) { return param.key === 'msid' });
-    });
+    const hasSourcesWithMsids = sources.some(sourceHasMsid);
     if (!hasSourcesWithMsids) {
         content.senders = "both";
     }
 }
 
-function filterToMatchingRecvonly(oldContent, newContent) {
-    if (oldContent.application.applicationType !== 'rtp') {
+// filters the sources in baseContent to only include sources which don't have an msid (recvonly) and have a corresponding source in compareContent that has an msid
+// also returns a boolean indicating that there are sources
+function filterToMatchingRecvonly(baseContent, compareContent) {
+    // if the content is not rtp or if the senders (direction) hasn't changed, then ignore it
+    if (baseContent.application.applicationType !== 'rtp' || baseContent.senders === compareContent.senders) {
         return;
     }
-    delete oldContent.transport;
-    delete oldContent.application.payloads;
-    delete oldContent.application.headerExtensions;
-    oldContent.application.mux = false;
+
+    delete baseContent.transport;
+    delete baseContent.application.payloads;
+    delete baseContent.application.headerExtensions;
+    baseContent.application.mux = false;
 
     var foundSource = false;
 
-    if (oldContent.application.sources) {
-        oldContent.application.sources = oldContent.application.sources.filter(function (source) {
+    if (baseContent.application.sources) {
+        baseContent.application.sources = baseContent.application.sources.filter(function (baseSource) {
             // if there's a msid, ignore it because its not recvonly
-            if (source.parameters.length !== 1) {
+            if (sourceHasMsid(baseSource)) {
               return false;
             }
 
             // try to find correpsonding source in new description
             var foundMatch = false;
-            for (var i = 0; i < newContent.application.sources.length; i++) {
-                if (source.ssrc === newContent.application.sources[i].ssrc) {
+            for (var i = 0; i < compareContent.application.sources.length; i++) {
+                const compareSource = compareContent.application.sources[i];
+                // if both content blocks have the ssrc and the compare source has an msid
+                if (baseSource.ssrc === compareSource.ssrc && sourceHasMsid(compareSource) ) {
                     foundMatch = true;
                     foundSource = true;
                     break;
@@ -105,11 +109,11 @@ function filterToMatchingRecvonly(oldContent, newContent) {
         });
     }
     // remove source groups not related to this stream
-    if (oldContent.application.sourceGroups) {
-        oldContent.application.sourceGroups = oldContent.application.sourceGroups.filter(function (group) {
+    if (baseContent.application.sourceGroups) {
+        baseContent.application.sourceGroups = baseContent.application.sourceGroups.filter(function (group) {
             var found = false;
-            for (var i = 0; i < oldContent.application.sources.length; i++) {
-                if (oldContent.application.sources[i].ssrc === group.sources[0]) {
+            for (var i = 0; i < baseContent.application.sources.length; i++) {
+                if (baseContent.application.sources[i].ssrc === group.sources[0]) {
                     found = true;
                     break;
                 }
@@ -118,6 +122,10 @@ function filterToMatchingRecvonly(oldContent, newContent) {
         });
     }
     return foundSource;
+}
+
+function sourceHasMsid(source) {
+    return source.parameters && source.parameters.some(function(param) { return param.key === 'msid' });
 }
 
 function MediaSession(opts) {
@@ -331,7 +339,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             answer.jingle.contents.forEach(filterUnusedLabels);
-            // this isn't needed because we are signaling a source-remove and then source-add when adding a stream
+            // this isn't needed current because we are signaling a source-remove and then source-add when adding a stream
+            // leaving here since the source-remove, source-add solution breaks firefox -> chrome
             // answer.jingle.contents.forEach(filterOutRecvonly);
             answer.jingle.contents.forEach(changeSendersIfNoMsids);
 
@@ -424,7 +433,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
           self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
 
           self.send('source-add', answer.jingle);
-          return err ? cb(err) : cb();
+          return cb();
         });
 
     },
@@ -435,6 +444,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
     removeStream: function (stream, renegotiate, cb) {
         var self = this;
+        var oldLocalDescription = self.pc.localDescription;
 
         cb = cb || function () {};
 
@@ -458,8 +468,13 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         this.pc.removeStream(stream);
 
         var errorMsg = 'removing stream';
-        queueOfferAnswer(self, errorMsg, this.pc.remoteDescription, function(err) {
-          return err ? cb(err) : cb();
+        queueOfferAnswer(self, errorMsg, this.pc.remoteDescription, function(err, answer) {
+            if (err) {
+                return cb(err);
+            }
+            // will send a source-add with the recvonly ssrc if needed
+            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
+            cb();
         });
     },
 
@@ -468,19 +483,18 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     },
 
     _removeRecvOnlySourceIfPresent: function(oldLocalDescription, newLocalDescription) {
-        var hasRecvonlySSRC = false;
         var desc = oldLocalDescription;
 
         // filter to only sources that changed from recvonly to sendrecv
-        desc.contents = desc.contents.filter((content) => {
-            if (content.application.applicationType === 'rtp' && content.application.sources && content.application.sources.length) {
+        desc.contents = desc.contents.filter(function(oldContent) {
+            if (oldContent.application.applicationType === 'rtp' && oldContent.application.sources && oldContent.application.sources.length) {
                 var matchingContentBlocks = newLocalDescription.contents.filter(function (newContent) {
                     // ignore if its not the same content block or if the direction (senders) hasn't changed
-                    if (content.name !== newContent.name || content.senders === newContent.senders) {
+                    if (oldContent.name !== newContent.name) {
                         return;
                     }
-
-                    return filterToMatchingRecvonly(content, newContent);
+                    // oldContent is modified by the filter method
+                    return filterToMatchingRecvonly(oldContent, newContent);
                 });
                 return matchingContentBlocks.length > 0;
             }
@@ -488,6 +502,29 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         delete desc.groups;
         if (desc.contents.length > 0) {
             this.send('source-remove', desc);
+        }
+    },
+
+    _addRecvOnlySourceIfNotPresent: function(oldLocalDescription, newLocalDescription) {
+        var desc = newLocalDescription;
+
+        // filter to only sources that changed from recvonly to sendrecv
+        desc.contents = desc.contents.filter(function(newContent) {
+            if (newContent.application.applicationType === 'rtp' && newContent.application.sources && newContent.application.sources.length) {
+                var matchingContentBlocks = oldLocalDescription.contents.filter(function (oldContent) {
+                    // ignore if its not the same content block or if the direction (senders) hasn't changed
+                    if (newContent.name !== oldContent.name) {
+                        return;
+                    }
+                    // newContent should have the recvonly source in this case since a stream is being removed
+                    return filterToMatchingRecvonly(newContent, oldContent);
+                });
+                return matchingContentBlocks.length > 0;
+            }
+        });
+        delete desc.groups;
+        if (desc.contents.length > 0) {
+            this.send('source-add', desc);
         }
     },
 
