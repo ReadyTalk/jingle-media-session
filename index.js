@@ -75,8 +75,8 @@ function changeSendersIfNoMsids(content) {
 // filters the sources in baseContent to only include sources which don't have an msid (recvonly) and have a corresponding source in compareContent that has an msid
 // also returns a boolean indicating that there are sources
 function filterToMatchingRecvonly(baseContent, compareContent) {
-    // if the content is not rtp or if the senders (direction) hasn't changed, then ignore it
-    if (baseContent.application.applicationType !== 'rtp' || baseContent.senders === compareContent.senders) {
+    // if the content is not rtp, ignore it
+    if (baseContent.application.applicationType !== 'rtp') {
         return;
     }
 
