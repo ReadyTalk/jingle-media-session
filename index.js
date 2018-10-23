@@ -60,6 +60,27 @@ function filterOutRecvonly(content) {
     });
 }
 
+function findMatchingContentBlock(content, jingleDescription) {
+    var contents = jingleDescription.contents || [];
+    const matchingContents = contents.filter(function (compareContent) {
+        return content.name === compareContent.name;
+    });
+    // intentionally returns null if more than one is matched as that shouldn't normally happen
+    if (matchingContents.length >= 1) {
+        return matchingContents[0];
+    }
+    return null;
+}
+
+function findMatchingSource(baseSource, compareSources = []) {
+    for (var i = 0; i < compareSources.length; i++) {
+        const compareSource = compareSources[i];
+        if (baseSource.ssrc === compareSource.ssrc) {
+            return compareSource;
+        }
+    }
+    return null;
+}
 
 function changeSendersIfNoMsids(content) {
     if (!content.application) return;
@@ -72,8 +93,11 @@ function changeSendersIfNoMsids(content) {
     }
 }
 
-// filters the sources in baseContent to only include sources which don't have an msid (recvonly) and have a corresponding source in compareContent that has an msid
-// also returns a boolean indicating that there are sources
+// filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
+// (not in compareContent sources) or that have a corresponding source in compareContent that has an msid (indicating)
+// that the source changed from recvonly to sendrecv. If no compareContent is passed in then it will filter the 
+// content block to any sources without an msid
+// Returns a boolean indicating that there are recvonly sources
 function filterToMatchingRecvonly(baseContent, compareContent) {
     // if the content is not rtp, ignore it
     if (baseContent.application.applicationType !== 'rtp') {
@@ -85,8 +109,6 @@ function filterToMatchingRecvonly(baseContent, compareContent) {
     delete baseContent.application.headerExtensions;
     baseContent.application.mux = false;
 
-    var foundSource = false;
-
     if (baseContent.application.sources) {
         baseContent.application.sources = baseContent.application.sources.filter(function (baseSource) {
             // if there's a msid, ignore it because its not recvonly
@@ -94,18 +116,18 @@ function filterToMatchingRecvonly(baseContent, compareContent) {
               return false;
             }
 
-            // try to find correpsonding source in new description
-            var foundMatch = false;
-            for (var i = 0; i < compareContent.application.sources.length; i++) {
-                const compareSource = compareContent.application.sources[i];
-                // if both content blocks have the ssrc and the compare source has an msid
-                if (baseSource.ssrc === compareSource.ssrc && sourceHasMsid(compareSource) ) {
-                    foundMatch = true;
-                    foundSource = true;
-                    break;
+            // try to find correpsonding source in compareContent if it exists
+            var foundNewRecvonlySource = false;
+            if (compareContent) {
+                var compareSource = findMatchingSource(baseSource, compareContent.application.sources);
+                // if the source is new or the source is now read only
+                if(!compareSource || (compareSource && sourceHasMsid(compareSource))) {
+                    foundNewRecvonlySource = true;
                 }
+            } else {
+                foundNewRecvonlySource = true;
             }
-            return foundMatch;
+            return foundNewRecvonlySource;
         });
     }
     // remove source groups not related to this stream
@@ -121,7 +143,7 @@ function filterToMatchingRecvonly(baseContent, compareContent) {
             return found;
         });
     }
-    return foundSource;
+    return baseContent.application.sources.length;
 }
 
 function sourceHasMsid(source) {
@@ -173,7 +195,6 @@ function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
       }
 
       self.pc.answer(self.constraints, function (err, answer) {
-
         if (err) {
           self._log('error', 'Could not create answer for ' + errorMsg);
           return done(err);
@@ -488,15 +509,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         // filter to only sources that changed from recvonly to sendrecv
         desc.contents = desc.contents.filter(function(oldContent) {
             if (oldContent.application.applicationType === 'rtp' && oldContent.application.sources && oldContent.application.sources.length) {
-                var matchingContentBlocks = newLocalDescription.contents.filter(function (newContent) {
-                    // ignore if its not the same content block or if the direction (senders) hasn't changed
-                    if (oldContent.name !== newContent.name) {
-                        return;
-                    }
-                    // oldContent is modified by the filter method
-                    return filterToMatchingRecvonly(oldContent, newContent);
-                });
-                return matchingContentBlocks.length > 0;
+                var newContent = findMatchingContentBlock(oldContent, newLocalDescription);
+                // the filter function handles the case where oldContent is null
+                return filterToMatchingRecvonly(oldContent, newContent);
             }
         });
         delete desc.groups;
@@ -511,15 +526,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         // filter to only sources that changed from recvonly to sendrecv
         desc.contents = desc.contents.filter(function(newContent) {
             if (newContent.application.applicationType === 'rtp' && newContent.application.sources && newContent.application.sources.length) {
-                var matchingContentBlocks = oldLocalDescription.contents.filter(function (oldContent) {
-                    // ignore if its not the same content block or if the direction (senders) hasn't changed
-                    if (newContent.name !== oldContent.name) {
-                        return;
-                    }
-                    // newContent should have the recvonly source in this case since a stream is being removed
-                    return filterToMatchingRecvonly(newContent, oldContent);
-                });
-                return matchingContentBlocks.length > 0;
+                var oldContent = findMatchingContentBlock(newContent, oldLocalDescription);
+                // the filter function handles the case where oldContent is null
+                return filterToMatchingRecvonly(newContent, oldContent);
             }
         });
         delete desc.groups;
@@ -750,12 +759,15 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
 
         var errorMsg = 'adding new stream source';
-        queueOfferAnswer(self, errorMsg, newDesc, function(err) {
-          return err ? cb({condition: 'general-error'}) : cb();
+        var oldLocalDescription = self.pc.localDescription;
+        queueOfferAnswer(self, errorMsg, newDesc, function(err, answer) {
+            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
+            return err ? cb({condition: 'general-error'}) : cb();
         });
     },
 
     onSourceRemove: function (changes, cb) {
+        var self = this;
         this._log('info', 'Removing stream source');
 
         var newDesc = this.pc.remoteDescription;
@@ -818,8 +830,10 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
 
         var errorMsg = 'removing stream source';
-        queueOfferAnswer(this, errorMsg, newDesc, function(err) {
-          return err ? cb({condition: 'general-error'}) : cb();
+        var oldLocalDescription = self.pc.localDescription;
+        queueOfferAnswer(this, errorMsg, newDesc, function(err, answer) {
+            self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
+            return err ? cb({condition: 'general-error'}) : cb();
         });
     },
 
