@@ -72,7 +72,8 @@ function findMatchingContentBlock(content, jingleDescription) {
     return null;
 }
 
-function findMatchingSource(baseSource, compareSources = []) {
+function findMatchingSource(baseSource, compareSources) {
+    compareSources = compareSources || [];
     for (var i = 0; i < compareSources.length; i++) {
         const compareSource = compareSources[i];
         if (baseSource.ssrc === compareSource.ssrc) {
