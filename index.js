@@ -762,8 +762,11 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         var errorMsg = 'adding new stream source';
         var oldLocalDescription = self.pc.localDescription;
         queueOfferAnswer(self, errorMsg, newDesc, function(err, answer) {
+            if (err) {
+                return cb({condition: 'general-error'})
+            }
             self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
-            return err ? cb({condition: 'general-error'}) : cb();
+            return cb();
         });
     },
 
@@ -833,8 +836,11 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         var errorMsg = 'removing stream source';
         var oldLocalDescription = self.pc.localDescription;
         queueOfferAnswer(this, errorMsg, newDesc, function(err, answer) {
+            if (err) {
+                return cb({condition: 'general-error'})
+            }
             self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
-            return err ? cb({condition: 'general-error'}) : cb();
+            return cb();
         });
     },
 
