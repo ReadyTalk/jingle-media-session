@@ -66,7 +66,7 @@ function findMatchingContentBlock(content, jingleDescription) {
         return content.name === compareContent.name;
     });
     // intentionally returns null if more than one is matched as that shouldn't normally happen
-    if (matchingContents.length >= 1) {
+    if (matchingContents.length === 1) {
         return matchingContents[0];
     }
     return null;
