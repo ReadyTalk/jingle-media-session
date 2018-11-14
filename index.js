@@ -452,7 +452,10 @@ MediaSession.prototype = extend(MediaSession.prototype, {
           });
           delete answer.jingle.groups;
 
-          self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
+          // use self.pc.localDescription instead of answer.jingle since answer.jingle gets modified above
+          var newLocalDescription = self.pc.localDescription;
+          // warning: this function modifies oldLocalDescription
+          self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
 
           self.send('source-add', answer.jingle);
           return cb();
@@ -494,7 +497,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             if (err) {
                 return cb(err);
             }
-            // will send a source-add with the recvonly ssrc if needed
+
+            // warning: this function modifies answer.jingle
             self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
             cb();
         });
@@ -765,6 +769,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             if (err) {
                 return cb({condition: 'general-error'})
             }
+            // warning: this function modifies answer.jingle
             self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
             return cb();
         });
@@ -839,6 +844,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             if (err) {
                 return cb({condition: 'general-error'})
             }
+            // warning: this function modifies oldLocalDescription
             self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
             return cb();
         });
