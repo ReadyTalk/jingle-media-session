@@ -49,20 +49,9 @@ function filterUnusedLabels(content) {
     });
 }
 
-function filterOutRecvonly(content) {
-    if (!content.application) return;
-
-    // remove sources that are missing an msid (they are recvonly)
-    var sources = content.application.sources || [];
-    content.application.sources = sources.filter(function (source) {
-        // recvonly sources won't have an msid, only a cname
-        return sourceHasMsid(source);
-    });
-}
-
 function findMatchingContentBlock(content, jingleDescription) {
     var contents = jingleDescription.contents || [];
-    const matchingContents = contents.filter(function (compareContent) {
+    var matchingContents = contents.filter(function (compareContent) {
         return content.name === compareContent.name;
     });
     // intentionally returns null if more than one is matched as that shouldn't normally happen
@@ -75,7 +64,7 @@ function findMatchingContentBlock(content, jingleDescription) {
 function findMatchingSource(baseSource, compareSources) {
     compareSources = compareSources || [];
     for (var i = 0; i < compareSources.length; i++) {
-        const compareSource = compareSources[i];
+        var compareSource = compareSources[i];
         if (baseSource.ssrc === compareSource.ssrc) {
             return compareSource;
         }
@@ -83,14 +72,20 @@ function findMatchingSource(baseSource, compareSources) {
     return null;
 }
 
+function sourceHasMsid(source) {
+    return source.parameters && source.parameters.some(function(param) { return param.key === 'msid'; });
+}
+
 function changeSendersIfNoMsids(content) {
-    if (!content.application) return;
+    if (!content.application) {
+        return;
+    }
 
     // remove sources that are missing an msid (they are recvonly)
     var sources = content.application.sources || [];
-    const hasSourcesWithMsids = sources.some(sourceHasMsid);
+    var hasSourcesWithMsids = sources.some(sourceHasMsid);
     if (!hasSourcesWithMsids) {
-        content.senders = "both";
+        content.senders = 'both';
     }
 }
 
@@ -108,6 +103,7 @@ function filterToMatchingRecvonly(baseContent, compareContent) {
     delete baseContent.transport;
     delete baseContent.application.payloads;
     delete baseContent.application.headerExtensions;
+    delete baseContent.application.ssrc;
     baseContent.application.mux = false;
 
     if (baseContent.application.sources) {
@@ -145,10 +141,6 @@ function filterToMatchingRecvonly(baseContent, compareContent) {
         });
     }
     return baseContent.application.sources.length;
-}
-
-function sourceHasMsid(source) {
-    return source.parameters && source.parameters.some(function(param) { return param.key === 'msid' });
 }
 
 function MediaSession(opts) {
@@ -426,7 +418,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
     addStream: function (stream, renegotiate, cb) {
         var self = this;
-        var oldLocalDescription = self.pc.localDescription;
+        var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
         cb = cb || function () {};
 
@@ -452,7 +444,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
           });
           delete answer.jingle.groups;
 
-          self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
+          var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+          self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
 
           self.send('source-add', answer.jingle);
           return cb();
@@ -466,7 +459,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
     removeStream: function (stream, renegotiate, cb) {
         var self = this;
-        var oldLocalDescription = self.pc.localDescription;
+        var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
         cb = cb || function () {};
 
@@ -490,12 +483,13 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         this.pc.removeStream(stream);
 
         var errorMsg = 'removing stream';
-        queueOfferAnswer(self, errorMsg, this.pc.remoteDescription, function(err, answer) {
+        queueOfferAnswer(self, errorMsg, this.pc.remoteDescription, function(err) {
             if (err) {
                 return cb(err);
             }
-            // will send a source-add with the recvonly ssrc if needed
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
+
+            var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             cb();
         });
     },
@@ -760,12 +754,14 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
 
         var errorMsg = 'adding new stream source';
-        var oldLocalDescription = self.pc.localDescription;
-        queueOfferAnswer(self, errorMsg, newDesc, function(err, answer) {
+        var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+        queueOfferAnswer(self, errorMsg, newDesc, function(err) {
             if (err) {
-                return cb({condition: 'general-error'})
+                return cb({condition: 'general-error'});
             }
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, answer.jingle);
+            
+            var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
@@ -834,12 +830,13 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
 
         var errorMsg = 'removing stream source';
-        var oldLocalDescription = self.pc.localDescription;
-        queueOfferAnswer(this, errorMsg, newDesc, function(err, answer) {
+        var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+        queueOfferAnswer(this, errorMsg, newDesc, function(err) {
             if (err) {
-                return cb({condition: 'general-error'})
+                return cb({condition: 'general-error'});
             }
-            self._removeRecvOnlySourceIfPresent(oldLocalDescription, answer.jingle);
+            var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+            self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
