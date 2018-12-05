@@ -712,7 +712,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             for (var i = 0; i < contents.length; i++) {
                 const filteredSsrcs = 
                     contents[i].application.sources.filter(function(source) {
-                        ssrcList.indexOf(source.ssrc) > -1;
+                        return ssrcList.indexOf(source.ssrc) > -1;
                     });
                 
                 if (filteredSsrcs.length) {
