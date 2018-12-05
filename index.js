@@ -678,12 +678,12 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         console.log('jm b4 shit: ', Object.keys(a));
         const sourcesAdded = [];
 
-        Object.keys(a).forEach(ssrc => {
+        Object.keys(a).forEach(function(ssrc) {
             for (let i = 0; i < newContents.length; i++) {
                 
                 newContents[i].application.sources = 
-                newContents[i].application.sources.filter(source => {
-                    return source.ssrc === ssrc
+                newContents[i].application.sources.filter(function(source) {
+                    return source.ssrc === ssrc;
                 });
 
                 if (newContents[i].application.sources.length) {
@@ -711,7 +711,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             const properContents = [];
             for (let i = 0; i < contents.length; i++) {
                 const filteredSsrcs = 
-                    contents[i].application.sources.filter(source => ssrcList.indexOf(source.ssrc) > -1 );
+                    contents[i].application.sources.filter(function(source) {
+                        ssrcList.indexOf(source.ssrc) > -1;
+                    });
                 
                 if (filteredSsrcs.length) {
                     contents[i].application.sources = filteredSsrcs;
@@ -736,9 +738,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             new_desc.contents = jmContent2;
             delete desc.groups;
             delete new_desc.groups;
-            desc.contents.forEach(content => {
-                content.application.sources.forEach(source => {
-                    source.parameters = source.parameters.filter(param => {
+            desc.contents.forEach(function(content) {
+                content.application.sources.forEach(function(source) {
+                    source.parameters = source.parameters.filter(function(param) {
                         if (param.key === 'msid') {
                             return false;
                         }
@@ -761,9 +763,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             delete desc.groups;
             delete new_desc.groups;
             
-            new_desc.contents.forEach(content => {
-                content.application.sources.forEach(source => {
-                    source.parameters = source.parameters.filter(param => {
+            new_desc.contents.forEach(function(content) {
+                content.application.sources.forEach(function(source) {
+                    source.parameters = source.parameters.filter(function(param) {
                         if (param.key === 'msid') {
                             return false;
                         }
@@ -802,9 +804,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         if (desc.contents.length > 0) {
             console.log('_removeRecvOnlySourceIfPresent found content remove', desc.contents.length);
             // remove msids
-            desc.contents.forEach(content => {
-                content.application.sources.forEach(source => {
-                    source.parameters = source.parameters.filter(param => {
+            desc.contents.forEach(function(content) {
+                content.application.sources.forEach(function(source) {
+                    source.parameters = source.parameters.filter(function(param) {
                         if (param.key === 'msid') {
                             return false;
                         }
@@ -838,9 +840,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         delete desc.groups;
         if (desc.contents.length > 0) {
             // remove msids
-            desc.contents.forEach(content => {
-                content.application.sources.forEach(source => {
-                    source.parameters = source.parameters.filter(param => {
+            desc.contents.forEach(function(content) {
+                content.application.sources.forEach(function(source) {
+                    source.parameters = source.parameters.filter(function(param) {
                         if (param.key === 'msid') {
                             return false;
                         }
