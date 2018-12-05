@@ -591,7 +591,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const newContents = newLocalDescription.contents.filter(getContent);
         console.log('jm remove shit oldContents: ', oldContents, newContents);
 
-        for (let i = 0; i < newContents; i++) {
+        for (var i = 0; i < newContents; i++) {
 
         }
     },
@@ -615,9 +615,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const sourcesModified = [];
         const sourcesToAddBack = [];
 
-        for (let i = 0; i < newContents.length; i++) {
+        for (var i = 0; i < newContents.length; i++) {
             console.log('jm new contents', newContents[i].application.sources.length);
-            for(let j = 0; j < newContents[i].application.sources.length; j++) {
+            for(var j = 0; j < newContents[i].application.sources.length; j++) {
                 console.log('jm new content sources: ', newContents[i].application.sources[j].ssrc);
                 a[newContents[i].application.sources[j].ssrc] = {
                     source: newContents[i].application.sources[j],
@@ -626,8 +626,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
         };
     
-        for (let i = 0; i < oldContents.length; i++) {
-            for(let j = 0; j < oldContents[i].application.sources.length; j++) {
+        for (var i = 0; i < oldContents.length; i++) {
+            for(var j = 0; j < oldContents[i].application.sources.length; j++) {
                 if (!a[oldContents[i].application.sources[j].ssrc]) {
                     // this IS a removed ssource
                     sourcesRemoved.push(oldContents[i].application.sources[j].ssrc);
@@ -679,7 +679,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const sourcesAdded = [];
 
         Object.keys(a).forEach(function(ssrc) {
-            for (let i = 0; i < newContents.length; i++) {
+            for (var i = 0; i < newContents.length; i++) {
                 
                 newContents[i].application.sources = 
                 newContents[i].application.sources.filter(function(source) {
@@ -709,10 +709,10 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         function getProperSSRCS(contents, ssrcList) {
             const properContents = [];
-            for (let i = 0; i < contents.length; i++) {
+            for (var i = 0; i < contents.length; i++) {
                 const filteredSsrcs = 
                     contents[i].application.sources.filter(function(source) {
-                        ssrcList.indexOf(source.ssrc) > -1;
+                        return ssrcList.indexOf(source.ssrc) > -1;
                     });
                 
                 if (filteredSsrcs.length) {
