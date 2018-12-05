@@ -4,6 +4,7 @@ var BaseSession = require('jingle-session');
 var RTCPeerConnection = require('rtcpeerconnection');
 var queue = require('queue');
 
+var jmglobal;
 
 function filterContentSources(content, stream) {
     if (content.application.applicationType !== 'rtp') {
@@ -20,9 +21,13 @@ function filterContentSources(content, stream) {
             if (source.parameters.length < 2) {
               return false;
             }
-            return (stream.id === source.parameters[1].value.split(' ')[0] || stream.label === source.parameters[1].value.split(' ')[0]);
+        
+            console.log('stream id: ', stream, source.parameters);
+            return (stream.id === source.parameters[1].value.split(' ')[0] 
+              || stream.label === source.parameters[1].value.split(' ')[0]);
         });
     }
+
     // remove source groups not related to this stream
     if (content.application.sourceGroups) {
         content.application.sourceGroups = content.application.sourceGroups.filter(function (group) {
@@ -88,6 +93,65 @@ function changeSendersIfNoMsids(content) {
         content.senders = 'both';
     }
 }
+
+// When we remove a source and need to add a recvonly source
+function filterAddRecvOnlyIfNotPresent(newContent, oldContent) {
+    if (newContent.application.applicationType !== 'rtp') {
+        return;
+    }
+
+    delete newContent.transport;
+    delete newContent.application.payloads;
+    delete newContent.application.headerExtensions;
+    delete newContent.application.ssrc;
+    newContent.application.mux = false;
+
+    console.log('filterAddRecvOnlyIfNotPresent');
+    console.log('newContent shit:', newContent.senders);
+    console.log('oldShit', oldContent.senders);
+    //direction application.senders  
+    if (newContent.application.sources && newContent.senders === 'initiator') {
+        newContent.application.sources = newContent.application.sources.filter(function (baseSource) {
+            
+            
+            // if there's a msid, ignore it because its not recvonly
+            // if (sourceHasMsid(baseSource)) {
+            //   return false;
+            // }
+
+
+            // try to find correpsonding source in compareContent if it exists
+            var foundNewRecvonlySource = false;
+            if (oldContent) {
+                var compareSource = findMatchingSource(baseSource, oldContent.application.sources);
+                // if the source is new or the source is now read only
+                // if(!compareSource || (compareSource && sourceHasMsid(compareSource))) {
+                if (!compareSource && oldContent.senders === 'both') {
+                    foundNewRecvonlySource = true;
+                }
+            } else {
+                foundNewRecvonlySource = true;
+            }
+            return foundNewRecvonlySource;
+        });
+    }
+    // remove source groups not related to this stream
+    if (newContent.application.sourceGroups) {
+        newContent.application.sourceGroups = newContent.application.sourceGroups.filter(function (group) {
+            var found = false;
+            for (var i = 0; i < newContent.application.sources.length; i++) {
+                if (newContent.application.sources[i].ssrc === group.sources[0]) {
+                    found = true;
+                    break;
+                }
+            }
+            return found;
+        });
+    }
+    return newContent.application.sources.length;
+
+};
+
 
 // filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
 // (not in compareContent sources) or that have a corresponding source in compareContent that has an msid (indicating)
@@ -162,6 +226,7 @@ function MediaSession(opts) {
     this.pc.on('addStream', this.onAddStream.bind(this));
     this.pc.on('removeStream', this.onRemoveStream.bind(this));
     this.pc.on('addChannel', this.onAddChannel.bind(this));
+    // this.pc.on('negotiationNeeded', this.onNegotiationNeeded.bind(this));
 
     if (opts.stream) {
         this.addStream(opts.stream);
@@ -172,6 +237,9 @@ function MediaSession(opts) {
 
 
 function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
+
+  console.log('jm - queueOfferAnswer jingleDesc', jingleDesc);
+
   self.q.push(function(qCb) {
     function done(err, answer) {
       qCb();
@@ -417,6 +485,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     // ----------------------------------------------------------------
 
     addStream: function (stream, renegotiate, cb) {
+        console.log('jm addStream');
         var self = this;
         var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
@@ -429,6 +498,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         } else if (typeof renegotiate === 'object') {
             self.constraints = renegotiate;
         }
+
         var errorMsg = 'adding new stream';
         queueOfferAnswer(this, errorMsg, self.pc.remoteDescription, function(err, answer) {
           if (err) {
@@ -440,14 +510,19 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             filterContentSources(content, stream);
           });
           answer.jingle.contents = answer.jingle.contents.filter(function (content) {
-            return content.application.applicationType === 'rtp' && content.application.sources && content.application.sources.length;
+            return content.application.applicationType === 'rtp' 
+                && content.application.sources 
+                && content.application.sources.length;
           });
           delete answer.jingle.groups;
 
           var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-          self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
+          const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
+        //   self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
 
-          self.send('source-add', answer.jingle);
+          if (answer.jingle) {
+            self.send('source-add', answer.jingle);
+          }
           return cb();
         });
 
@@ -458,6 +533,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     },
 
     removeStream: function (stream, renegotiate, cb) {
+        console.log('jm removeStream');
         var self = this;
         var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
@@ -479,7 +555,11 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
         delete desc.groups;
 
-        this.send('source-remove', desc);
+        if (desc.contents.length) {
+            console.log('jm remove this source dewd: ', desc);
+            this.send('source-remove', desc);
+        }
+ 
         this.pc.removeStream(stream);
 
         var errorMsg = 'removing stream';
@@ -489,7 +569,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
+            const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
+            // self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             cb();
         });
     },
@@ -498,20 +579,244 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         this.removeStream(stream, true, cb);
     },
 
+    _removeShit: function(oldLocalDescription, newLocalDescription) {
+        const desc = oldLocalDescription;
+        delete desc.group;
+        function getContent(content) {
+            return content.application.applicationType === 'rtp' 
+            && content.application.sources 
+            && content.application.sources.length;
+        }
+        const oldContents = oldLocalDescription.contents.filter(getContent);
+        const newContents = newLocalDescription.contents.filter(getContent);
+        console.log('jm remove shit oldContents: ', oldContents, newContents);
+
+        for (let i = 0; i < newContents; i++) {
+
+        }
+    },
+    // Justin's new functions
+    _doShit: function(oldLocalDescription, newLocalDescription) {
+        const desc = oldLocalDescription;
+        delete desc.group;
+
+        function getContent(content) {
+            return content.application.applicationType === 'rtp' 
+            && content.application.sources 
+            && content.application.sources.length;
+        }
+
+        const oldContents = oldLocalDescription.contents.filter(getContent);
+        const newContents = newLocalDescription.contents.filter(getContent);
+        console.log('jm oldContents: ', oldContents, newContents);
+
+        const a = {};
+        const sourcesRemoved = [];
+        const sourcesModified = [];
+        const sourcesToAddBack = [];
+
+        for (let i = 0; i < newContents.length; i++) {
+            console.log('jm new contents', newContents[i].application.sources.length);
+            for(let j = 0; j < newContents[i].application.sources.length; j++) {
+                console.log('jm new content sources: ', newContents[i].application.sources[j].ssrc);
+                a[newContents[i].application.sources[j].ssrc] = {
+                    source: newContents[i].application.sources[j],
+                    direction: newContents[i].senders,
+                };
+            }
+        };
+    
+        for (let i = 0; i < oldContents.length; i++) {
+            for(let j = 0; j < oldContents[i].application.sources.length; j++) {
+                if (!a[oldContents[i].application.sources[j].ssrc]) {
+                    // this IS a removed ssource
+                    sourcesRemoved.push(oldContents[i].application.sources[j].ssrc);
+                }
+                else {
+                    // this is a possible modified source
+                    const oldContentHasMsid = sourceHasMsid(oldContents[i].application.sources[j]);
+                    const oldContentSourceDirection = oldContents[i].senders;
+                    const newContentHasMsid = sourceHasMsid(a[oldContents[i].application.sources[j].ssrc].source);
+                    const newContentSourceDirection = a[oldContents[i].application.sources[j].ssrc].direction;
+
+                    if (newContentSourceDirection !== oldContentSourceDirection) {
+                        // Direction has changed
+                        delete oldContents[i].transport;
+                        delete oldContents[i].application.payloads;
+
+                        console.log('jm direction change detected')
+
+                        switch (newContentSourceDirection) {
+                            case 'both':
+                                // if newContent does not have msid don't change direction.
+                                if (!newContentHasMsid) {
+                                    console.log('jm trying to changed direction to sendrecv that does not have a msid: ', oldContents[i].application.sources[j].ssrc);    
+                                }
+                                else {
+                                    console.log('jm newContent is now sendrecv -> send sr (old) sa(new)', oldContents[i].application.sources[j].ssrc);
+                                    sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                                }
+                            break;
+                            case 'initiator':
+                                console.log('jm newContent is now recvonly -> send sr (new) sa(old)', oldContents[i].application.sources[j].ssrc);
+                                sourcesToAddBack.push(oldContents[i].application.sources[j].ssrc);
+                            break;
+                            default:
+                            console.log('jm I should not be here');
+                        }    
+                    }
+                    else {
+                        if(oldContentHasMsid && !newContentHasMsid) {
+                            console.log('jm the msid from the newcontent was created');
+                        }    
+                    }
+                }
+                delete a[oldContents[i].application.sources[j].ssrc];
+            }
+        }
+
+        console.log('jm b4 shit: ', Object.keys(a));
+        const sourcesAdded = [];
+
+        Object.keys(a).forEach(ssrc => {
+            for (let i = 0; i < newContents.length; i++) {
+                
+                newContents[i].application.sources = 
+                newContents[i].application.sources.filter(source => {
+                    return source.ssrc === ssrc
+                });
+
+                if (newContents[i].application.sources.length) {
+                   delete newContents[i].transport;
+                   delete newContents[i].ssrc;
+                   delete newContents[i].application.payloads;
+                   sourcesAdded.push(newContents[i]);
+                } 
+            }
+        });
+
+        console.log('jm removedSources: ', sourcesRemoved);
+        console.log('jm sourcesAdded: ', sourcesAdded);
+        console.log('jm sourcesModifed: ', sourcesModified);
+        console.log('jm sourcesToAddBack: ', sourcesToAddBack)
+
+        if (sourcesAdded.length) {
+           const new_desc = newLocalDescription;
+           delete new_desc.groups;
+           new_desc.contents = sourcesAdded;
+           this.send('source-add', new_desc);
+        }
+
+        function getProperSSRCS(contents, ssrcList) {
+            const properContents = [];
+            for (let i = 0; i < contents.length; i++) {
+                const filteredSsrcs = 
+                    contents[i].application.sources.filter(source => ssrcList.indexOf(source.ssrc) > -1 );
+                
+                if (filteredSsrcs.length) {
+                    contents[i].application.sources = filteredSsrcs;
+                    delete contents[i].transport;
+                    delete contents[i].ssrc;
+                    delete contents[i].application.payloads;
+                    contents[i].application.mux = false;
+                    contents[i].application.headerExtensions = [];
+                    properContents.push(contents[i]);
+                }
+            }
+            return properContents;
+        }
+
+        if (sourcesModified.length) {
+            const new_desc = newLocalDescription;
+
+            const jmContent = getProperSSRCS(oldContents, sourcesModified);
+            const jmContent2 = getProperSSRCS(newContents, sourcesModified);
+        
+            desc.contents = jmContent;
+            new_desc.contents = jmContent2;
+            delete desc.groups;
+            delete new_desc.groups;
+            desc.contents.forEach(content => {
+                content.application.sources.forEach(source => {
+                    source.parameters = source.parameters.filter(param => {
+                        if (param.key === 'msid') {
+                            return false;
+                        }
+                        return true;
+                    });
+                });
+            });
+
+            this.send('source-remove', desc);
+            this.send('source-add', new_desc);
+        }
+        if (sourcesToAddBack.length) {
+            const new_desc = newLocalDescription;
+            const jmContent = getProperSSRCS(oldContents, sourcesToAddBack);
+            const jmContent2 = getProperSSRCS(newContents, sourcesToAddBack);
+
+            console.log('jmContents: ', jmContent, jmContent2);
+            desc.contents = jmContent;
+            new_desc.contents = jmContent2;
+            delete desc.groups;
+            delete new_desc.groups;
+            
+            new_desc.contents.forEach(content => {
+                content.application.sources.forEach(source => {
+                    source.parameters = source.parameters.filter(param => {
+                        if (param.key === 'msid') {
+                            return false;
+                        }
+                        return true;
+                    });
+                });
+            });
+            // desc.contents = sourcesToAddBack;
+            this.send('source-remove', desc);
+            this.send('source-add', new_desc);  
+        }
+
+    },
+
     _removeRecvOnlySourceIfPresent: function(oldLocalDescription, newLocalDescription) {
         var desc = oldLocalDescription;
 
+        console.log('_removeRecvOnlySourceIfPresent: ', oldLocalDescription, newLocalDescription);
+
         // filter to only sources that changed from recvonly to sendrecv
         desc.contents = desc.contents.filter(function(oldContent) {
-            if (oldContent.application.applicationType === 'rtp' && oldContent.application.sources && oldContent.application.sources.length) {
+        
+            if (oldContent.application.applicationType === 'rtp'
+              && oldContent.application.sources 
+              && oldContent.application.sources.length) {
                 var newContent = findMatchingContentBlock(oldContent, newLocalDescription);
+                console.log('oC sender: ' + oldContent.senders + ' nC sender: ' + newContent.senders)
+                // if (oldContent.senders === 'both' && newContent.senders === 'both') {
+                //   return false;
+                // }
                 // the filter function handles the case where oldContent is null
                 return filterToMatchingRecvonly(oldContent, newContent);
             }
         });
         delete desc.groups;
         if (desc.contents.length > 0) {
+            console.log('_removeRecvOnlySourceIfPresent found content remove', desc.contents.length);
+            // remove msids
+            desc.contents.forEach(content => {
+                content.application.sources.forEach(source => {
+                    source.parameters = source.parameters.filter(param => {
+                        if (param.key === 'msid') {
+                            return false;
+                        }
+                        return true;
+                    });
+                });
+            })
+            console.log('jm send sr');
             this.send('source-remove', desc);
+        }
+        else {
+            console.log('_removeRecvOnlySourceIfPresent no recv-only content to remove');
         }
     },
 
@@ -520,14 +825,30 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         // filter to only sources that changed from recvonly to sendrecv
         desc.contents = desc.contents.filter(function(newContent) {
-            if (newContent.application.applicationType === 'rtp' && newContent.application.sources && newContent.application.sources.length) {
+            if (newContent.application.applicationType === 'rtp'
+                && newContent.application.media === 'video'
+                && newContent.application.sources 
+                && newContent.application.sources.length) {
                 var oldContent = findMatchingContentBlock(newContent, oldLocalDescription);
                 // the filter function handles the case where oldContent is null
-                return filterToMatchingRecvonly(newContent, oldContent);
+                return filterAddRecvOnlyIfNotPresent(newContent, oldContent);
+                // return filterToMatchingRecvonly(newContent, oldContent);
             }
         });
         delete desc.groups;
         if (desc.contents.length > 0) {
+            // remove msids
+            desc.contents.forEach(content => {
+                content.application.sources.forEach(source => {
+                    source.parameters = source.parameters.filter(param => {
+                        if (param.key === 'msid') {
+                            return false;
+                        }
+                        return true;
+                    });
+                });
+            })
+    
             this.send('source-add', desc);
         }
     },
@@ -761,7 +1082,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
             
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
+            const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription, true);
+            // self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
@@ -836,7 +1158,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 return cb({condition: 'general-error'});
             }
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
+            const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
+            
+            // self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
