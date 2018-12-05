@@ -679,7 +679,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const sourcesAdded = [];
 
         Object.keys(a).forEach(function(ssrc) {
-            for (let i = 0; i < newContents.length; i++) {
+            for (var i = 0; i < newContents.length; i++) {
                 
                 newContents[i].application.sources = 
                 newContents[i].application.sources.filter(function(source) {
@@ -709,7 +709,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         function getProperSSRCS(contents, ssrcList) {
             const properContents = [];
-            for (let i = 0; i < contents.length; i++) {
+            for (var i = 0; i < contents.length; i++) {
                 const filteredSsrcs = 
                     contents[i].application.sources.filter(function(source) {
                         ssrcList.indexOf(source.ssrc) > -1;
