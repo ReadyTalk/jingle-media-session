@@ -152,9 +152,6 @@ function filterAddRecvOnlyIfNotPresent(newContent, oldContent) {
 
 };
 
-function diffArray(a = [], b = []) {
-    return a.filter(x => !(b.indexOf(x) > -1 ));
-}
 
 // filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
 // (not in compareContent sources) or that have a corresponding source in compareContent that has an msid (indicating)
