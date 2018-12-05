@@ -153,7 +153,7 @@ function filterAddRecvOnlyIfNotPresent(newContent, oldContent) {
 };
 
 function diffArray(a = [], b = []) {
-    return a.filter(x => !b.includes(x));
+    return a.filter(x => !(b.indexOf(x) > -1 ));
 }
 
 // filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
@@ -714,7 +714,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             const properContents = [];
             for (let i = 0; i < contents.length; i++) {
                 const filteredSsrcs = 
-                    contents[i].application.sources.filter(source => ssrcList.includes(source.ssrc));
+                    contents[i].application.sources.filter(source => ssrcList.indexOf(source.ssrc) > -1 );
                 
                 if (filteredSsrcs.length) {
                     contents[i].application.sources = filteredSsrcs;
