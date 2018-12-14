@@ -11,7 +11,6 @@ var queue = require('queue');
 var jmglobal;
 
 function filterContentSources(content, stream) {
-    console.log('content at start of  filterContentSources', JSON.stringify(content, null , 2), stream);
     if (content.application.applicationType !== 'rtp') {
         return;
     }
@@ -44,11 +43,9 @@ function filterContentSources(content, stream) {
             return found;
         });
     }
-    console.log('content at end of  filterContentSources', JSON.stringify(content, null , 2) );
 }
 
 function filterMsidFromRecvonlySources(description) {
-    console.log('start of  filter', JSON.stringify(description, null, 2));
     const modifiedDesc = {}
     description.contents.forEach(function(content) {
         content.application.sources.forEach(function(source) {
@@ -60,11 +57,9 @@ function filterMsidFromRecvonlySources(description) {
                 }
                 return true;
             });
-            console.log('in end of  filter source is', JSON.stringify(source.parameters));
         });
     });
 
-    console.log('end of  filter desc is',  JSON.stringify(description, null, 2));
     return description;
 }
 
@@ -164,7 +159,6 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                     return source.ssrc === ssrc;
                 });
 
-            console.log(' new content checking for at i  ', i , JSON.stringify(newContents[i], null, 2));
 
 
             if (newContents[i].application.sources.length) {
@@ -593,7 +587,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 // leaving here since the source-remove, source-add solution breaks firefox -> chrome
                 // answer.jingle.contents.forEach(filterOutRecvonly);
                 answer.jingle.contents.forEach(changeSendersIfNoMsids);
-
+                console.log('raw: session accept is ', JSON.stringify(answer.jingle, null, 2));
                 self.send('session-accept', answer.jingle);
 
                 next();
@@ -690,9 +684,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
             console.log('new local description before filtering ', JSON.stringify(newLocalDescription.contents))
-            newLocalDescription.contents.forEach( function (content) {
-                filterContentSources(content, stream);
-            });
+            // newLocalDescription.contents.forEach( function (content) {
+            //     filterContentSources(content, stream);
+            // });
             console.log('new local description after filtering ', JSON.stringify(newLocalDescription.contents))
             const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
             //   self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
@@ -766,6 +760,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     // Justin's new functions
     _doShit: function(oldLocalDescription, newLocalDescription) {
 
+
+        console.log('in start of  do shit oldLocalDescription', oldLocalDescription);
+        console.log('in start of  do shit newLocalDescription', newLocalDescription);
         const oldDescCopy = JSON.parse(JSON.stringify(oldLocalDescription));
         const newDescCopy =  JSON.parse(JSON.stringify(newLocalDescription));
 
@@ -781,14 +778,16 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 && content.application.sources.length;
         }
 
-        const oldContents = oldLocalDescription.contents.filter(getContent);
-        const newContents = newLocalDescription.contents.filter(getContent);
+        const oldContents = oldDescCopy.contents.filter(getContent);
+        const newContents = newDescCopy.contents.filter(getContent);
 
         const sourcesRemoved = diffObject.sourcesRemoved;
         const sourcesAdded = diffObject.sourcesAdded;
         const sourcesModified = diffObject.sourcesModified;
         const sourcesToAddBack = diffObject.sourcesToAddBack;
-        this._signalDifferenceiInSources({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription, newLocalDescription, oldContents, newContents });
+        console.log('passing oldDescCopy to _signalDifferenceiInSources', JSON.stringify(oldDescCopy, null, 2));
+        console.log('passing newDescCopy to _signalDifferenceiInSources', JSON.stringify(newDescCopy, null, 2));
+        this._signalDifferenceiInSources({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription:oldDescCopy, newLocalDescription:newDescCopy, oldContents, newContents });
 
         console.log('wh end of do shit')
 
@@ -796,11 +795,15 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
     _signalDifferenceiInSources: function({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription, newLocalDescription, oldContents, newContents }){
 
+        console.log('wh start signalDifferenceiInSources  oldContents', JSON.stringify(oldContents, null , 2));
+        console.log('wh start signalDifferenceiInSources  newContents', JSON.stringify(newContents, null , 2));
 
+        console.log('foo2');
         console.log('wh start signalDifferenceiInSources sourcesRemoved', sourcesRemoved);
         console.log('wh start signalDifferenceiInSources  sourcesAdded',  sourcesAdded);
         console.log('wh start signalDifferenceiInSources  sourcesModified', sourcesModified);
         console.log('wh start signalDifferenceiInSources  sourcesToAddBack', sourcesToAddBack);
+
 
         const desc = oldLocalDescription;
         delete desc.groups;
@@ -810,13 +813,14 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             delete new_desc.groups;
             const whContent = getProperSSRCS(newContents, sourcesAdded);
             new_desc.contents = whContent;
-
+            console.log('in sources added sending source added' , new_desc);
             this.send('source-add', new_desc);
         }
 
         if (sourcesRemoved.length && !sourcesModified.length) { // to avoid signaling remove twice
             const whContent = getProperSSRCS(oldContents, sourcesRemoved)
             desc.contents = whContent
+            console.log('in sources removed sending source remove' , desc);
             this.send('source-remove', desc)
         }
 
@@ -846,13 +850,11 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             const filteredDesc = filterMsidFromRecvonlySources(desc);
             const filteredNewDesc = filterMsidFromRecvonlySources(new_desc);
 
-            console.log('at end of sources modified with filteredDesc', filteredDesc);
-            console.log('at end of sources modified with filteredNewDesc', filteredNewDesc);
+            console.log('in sources modified sending source remove ', filteredDesc );
+            console.log('in sources modified sending source add ', filteredNewDesc );
 
-
-
-            this.send('source-remove', desc);
-            this.send('source-add', new_desc);
+            this.send('source-remove', filteredDesc);
+            this.send('source-add', filteredNewDesc);
         }
         if (sourcesToAddBack.length) {
             const new_desc = newLocalDescription;
@@ -875,6 +877,10 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                     });
                 });
             });
+
+            console.log('in sources to add back sending source remove ', desc );
+            console.log('in sources to add back sending source add ', new_desc );
+
             // desc.contents = sourcesToAddBack;
             this.send('source-remove', desc);
             this.send('source-add', new_desc);
