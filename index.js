@@ -11,6 +11,7 @@ var queue = require('queue');
 var jmglobal;
 
 function filterContentSources(content, stream) {
+    console.log('content at start of  filterContentSources', JSON.stringify(content, null , 2), stream);
     if (content.application.applicationType !== 'rtp') {
         return;
     }
@@ -25,8 +26,6 @@ function filterContentSources(content, stream) {
             if (source.parameters.length < 2) {
                 return false;
             }
-
-            console.log('stream id: ', stream, source.parameters);
             return (stream.id === source.parameters[1].value.split(' ')[0]
                 || stream.label === source.parameters[1].value.split(' ')[0]);
         });
@@ -45,6 +44,28 @@ function filterContentSources(content, stream) {
             return found;
         });
     }
+    console.log('content at end of  filterContentSources', JSON.stringify(content, null , 2) );
+}
+
+function filterMsidFromRecvonlySources(description) {
+    console.log('start of  filter', JSON.stringify(description, null, 2));
+    const modifiedDesc = {}
+    description.contents.forEach(function(content) {
+        content.application.sources.forEach(function(source) {
+            console.log('in filterMsidFromRecvonlySources source is ', JSON.stringify(source.parameters));
+            source.parameters = source.parameters.filter(function(param) {
+                if (param.key === 'msid' && (description.senders ==='initiator' || description.senders ==='none')) {
+                    consle.log('filtered an misd')
+                    return false;
+                }
+                return true;
+            });
+            console.log('in end of  filter source is', JSON.stringify(source.parameters));
+        });
+    });
+
+    console.log('end of  filter desc is',  JSON.stringify(description, null, 2));
+    return description;
 }
 
 function getContent(content) {
@@ -143,11 +164,14 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                     return source.ssrc === ssrc;
                 });
 
+            console.log(' new content checking for at i  ', i , JSON.stringify(newContents[i], null, 2));
+
+
             if (newContents[i].application.sources.length) {
                 delete newContents[i].transport;
                 delete newContents[i].ssrc;
                 delete newContents[i].application.payloads;
-                sourcesAdded.push(newContents[i]);
+                sourcesAdded.push(newContents[i].application.sources[0].ssrc);
             }
         }
     });
@@ -664,11 +688,17 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             //end of dead code
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+
+            console.log('new local description before filtering ', JSON.stringify(newLocalDescription.contents))
+            newLocalDescription.contents.forEach( function (content) {
+                filterContentSources(content, stream);
+            });
+            console.log('new local description after filtering ', JSON.stringify(newLocalDescription.contents))
             const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
             //   self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
 
             if (answer.jingle) {
-                console.log('wh would be sending source add ', answer.jingle)
+                console.log('wh would be sending source add ', JSON.stringify(answer.jingle, null , 2));
                 // self.send('source-add', answer.jingle);
             }
             return cb();
@@ -758,7 +788,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const sourcesAdded = diffObject.sourcesAdded;
         const sourcesModified = diffObject.sourcesModified;
         const sourcesToAddBack = diffObject.sourcesToAddBack;
-        console.log('this.is ', this);
         this._signalDifferenceiInSources({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription, newLocalDescription, oldContents, newContents });
 
         console.log('wh end of do shit')
@@ -774,13 +803,21 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         console.log('wh start signalDifferenceiInSources  sourcesToAddBack', sourcesToAddBack);
 
         const desc = oldLocalDescription;
-        delete desc.group;
+        delete desc.groups;
 
         if (sourcesAdded.length) {
             const new_desc = newLocalDescription;
             delete new_desc.groups;
-            new_desc.contents = sourcesAdded;
+            const whContent = getProperSSRCS(newContents, sourcesAdded);
+            new_desc.contents = whContent;
+
             this.send('source-add', new_desc);
+        }
+
+        if (sourcesRemoved.length && !sourcesModified.length) { // to avoid signaling remove twice
+            const whContent = getProperSSRCS(oldContents, sourcesRemoved)
+            desc.contents = whContent
+            this.send('source-remove', desc)
         }
 
 
@@ -795,16 +832,23 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             new_desc.contents = jmContent2;
             delete desc.groups;
             delete new_desc.groups;
-            desc.contents.forEach(function(content) {
-                content.application.sources.forEach(function(source) {
-                    source.parameters = source.parameters.filter(function(param) {
-                        if (param.key === 'msid') {
-                            return false;
-                        }
-                        return true;
-                    });
-                });
-            });
+            // desc.contents.forEach(function(content) {
+            //     content.application.sources.forEach(function(source) {
+            //         source.parameters = source.parameters.filter(function(param) {
+            //             if (param.key === 'msid') {
+            //                 return false;
+            //             }
+            //             return true;
+            //         });
+            //     });
+            // });
+
+            const filteredDesc = filterMsidFromRecvonlySources(desc);
+            const filteredNewDesc = filterMsidFromRecvonlySources(new_desc);
+
+            console.log('at end of sources modified with filteredDesc', filteredDesc);
+            console.log('at end of sources modified with filteredNewDesc', filteredNewDesc);
+
 
 
             this.send('source-remove', desc);
@@ -1142,6 +1186,13 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
+            newLocalDescription.contents.forEach( function(content) {
+                delete content.transport;
+                delete content.application.payloads;
+                delete content.application.headerExtensions;
+            })
+            console.log('deleting content in new local desc')
+
             const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription, true);
             // self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             return cb();
