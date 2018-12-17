@@ -136,28 +136,30 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
         }
     }
 
+
     const sourcesAdded = [];
 
-    Object.keys(sourceMap).forEach(function(ssrc) {
-        for (var i = 0; i < newContents.length; i++) {
 
-            newContents[i].application.sources =
-                newContents[i].application.sources.filter(function(source) {
-                    return source.ssrc === ssrc;
-                });
+    for (var i = 0; i < newContents.length; i++) {
 
 
+        newContents[i].application.sources =
+            newContents[i].application.sources.filter(function(source) {
+                return sourceMap[source.ssrc]
+            });
 
-            if (newContents[i].application.sources.length) {
-                delete newContents[i].transport;
-                delete newContents[i].ssrc;
-                delete newContents[i].application.payloads;
-                sourcesAdded.push(newContents[i].application.sources[0].ssrc);
+        if (newContents[i].application.sources.length) {
+            delete newContents[i].transport;
+            delete newContents[i].ssrc;
+            delete newContents[i].application.payloads;
+            for( var j = 0; j < newContents[i].application.sources.length; j++ ){
+                sourcesAdded.push(newContents[i].application.sources[j].ssrc);
             }
         }
-    });
+    };
     return { sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded, sourcesModified: sourcesModified, sourcesToAddBack: sourcesToAddBack };
 }
+
 
 
 function getProperSSRCS(contents, ssrcList) {
