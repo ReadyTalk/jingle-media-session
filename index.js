@@ -52,7 +52,6 @@ function filterMsidFromRecvonlySources(description) {
             console.log('in filterMsidFromRecvonlySources source is ', JSON.stringify(source.parameters));
             source.parameters = source.parameters.filter(function(param) {
                 if (param.key === 'msid' && (description.senders ==='initiator' || description.senders ==='none')) {
-                    consle.log('filtered an misd')
                     return false;
                 }
                 return true;
@@ -76,8 +75,6 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
 
     const oldContents = oldLocalDescription.contents.filter(getContent);
     const newContents = newLocalDescription.contents.filter(getContent);
-    // console.log('wh oldContents: ', oldContents);
-    // console.log('wh newContents: ', newContents);
 
     const sourceMap = {};
     const sourcesRemoved = [];
@@ -85,9 +82,7 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
     const sourcesToAddBack = [];
 
     for (var i = 0; i < newContents.length; i++) {
-        // console.log('wh new contents', newContents[i].application.sources.length);
         for(var j = 0; j < newContents[i].application.sources.length; j++) {
-            // console.log('wh new content sources: ', newContents[i].application.sources[j].ssrc);
             sourceMap[newContents[i].application.sources[j].ssrc] = {
                 source: newContents[i].application.sources[j],
                 direction: newContents[i].senders,
@@ -95,14 +90,11 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
         }
     };
 
-    // console.log('wh even more b4 shit:  keys ', Object.keys(sourceMap));
-    // console.log('wh even more b4 shit:  values', Object.values(sourceMap));
 
     for (var i = 0; i < oldContents.length; i++) {
         for(var j = 0; j < oldContents[i].application.sources.length; j++) {
             if (!sourceMap[oldContents[i].application.sources[j].ssrc]) {
                 // this IS a removed ssource
-                console.log(' wh pushing source to source removed in enew diff method', oldContents[i].application.sources[j].ssrc)
                 sourcesRemoved.push(oldContents[i].application.sources[j].ssrc);
             }
             else {
@@ -117,21 +109,17 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                     delete oldContents[i].transport;
                     delete oldContents[i].application.payloads;
 
-                    console.log('wh direction change detected');
 
                     switch (newContentSourceDirection) {
                         case 'both':
                             // if newContent does not have msid don't change direction.
                             if (!newContentHasMsid) {
-                                console.log('wh trying to changed direction to sendrecv that does not have a msid: ', oldContents[i].application.sources[j].ssrc);
                             }
                             else {
-                                console.log('wh newContent is now sendrecv -> send sr (old) sa(new)', oldContents[i].application.sources[j].ssrc);
                                 sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                             }
                             break;
                         case 'initiator':
-                            console.log('wh newContent is now recvonly -> send sr (new) sa(old)', oldContents[i].application.sources[j].ssrc);
                             sourcesToAddBack.push(oldContents[i].application.sources[j].ssrc);
                             break;
                         default:
@@ -141,7 +129,6 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                 else {
                     if(oldContentHasMsid !== newContentHasMsid) {
                         sourcesModified.push(oldContents[i].application.sources[j].ssrc);
-                        console.log('wh the msid from the newcontent was created');
                     }
                 }
             }
@@ -149,34 +136,35 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
         }
     }
 
-    const sourcesAdded = [];
 
-    Object.keys(sourceMap).forEach(function(ssrc) {
-        for (var i = 0; i < newContents.length; i++) {
+    const sourcesAdded = Object.keys(sourceMap);
 
-            newContents[i].application.sources =
-                newContents[i].application.sources.filter(function(source) {
-                    return source.ssrc === ssrc;
-                });
+    //
+    // for (var i = 0; i < newContents.length; i++) {
+    //
+    //
+    //     newContents[i].application.sources =
+    //         newContents[i].application.sources.filter(function(source) {
+    //             return sourceMap[source.ssrc]
+    //         });
+    //
+    //     if (newContents[i].application.sources.length) {
+    //         delete newContents[i].transport;
+    //         delete newContents[i].ssrc;
+    //         delete newContents[i].application.payloads;
+    //         for( var j = 0; j < newContents[i].application.sources.length; j++ ){
+    //             sourcesAdded.push(newContents[i].application.sources[j].ssrc);
+    //         }
+    //     }
+    // };
 
-
-
-            if (newContents[i].application.sources.length) {
-                delete newContents[i].transport;
-                delete newContents[i].ssrc;
-                delete newContents[i].application.payloads;
-                sourcesAdded.push(newContents[i].application.sources[0].ssrc);
-            }
-        }
-    });
-    const diffObject = { sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack};
     console.log('wh end of generate differences returning sourcesRemoved', sourcesRemoved);
     console.log('wh end of generate differences returning sourcesAdded',  sourcesAdded);
     console.log('wh end of generate {differences returning sourcesModified', sourcesModified);
     console.log('wh end of generate differences returning sourcesToAddBack', sourcesToAddBack);
-    console.log(' wh end of generate diff object', diffObject);
-    return diffObject;
+    return { sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded, sourcesModified: sourcesModified, sourcesToAddBack: sourcesToAddBack };
 }
+
 
 
 function getProperSSRCS(contents, ssrcList) {
@@ -196,9 +184,6 @@ function getProperSSRCS(contents, ssrcList) {
             delete contents[i].application.headerExtensions;
             properContents.push(contents[i]);
         }
-        else{
-            console.log('filteredSsrcs is empty', filteredSsrcs);
-        }
     }
     return properContents;
 }
@@ -211,18 +196,6 @@ function filterUnusedLabels(content) {
             return !(parameter.key === 'mslabel' || parameter.key === 'label');
         });
     });
-}
-
-function findMatchingContentBlock(content, jingleDescription) {
-    var contents = jingleDescription.contents || [];
-    var matchingContents = contents.filter(function (compareContent) {
-        return content.name === compareContent.name;
-    });
-    // intentionally returns null if more than one is matched as that shouldn't normally happen
-    if (matchingContents.length === 1) {
-        return matchingContents[0];
-    }
-    return null;
 }
 
 function findMatchingSource(baseSource, compareSources) {
@@ -253,118 +226,6 @@ function changeSendersIfNoMsids(content) {
     }
 }
 
-// When we remove a source and need to add a recvonly source
-function filterAddRecvOnlyIfNotPresent(newContent, oldContent) {
-    if (newContent.application.applicationType !== 'rtp') {
-        return;
-    }
-
-    delete newContent.transport;
-    delete newContent.application.payloads;
-    delete newContent.application.headerExtensions;
-    delete newContent.application.ssrc;
-    newContent.application.mux = false;
-
-    console.log('filterAddRecvOnlyIfNotPresent');
-    console.log('newContent shit:', newContent.senders);
-    console.log('oldShit', oldContent.senders);
-    //direction application.senders
-    if (newContent.application.sources && newContent.senders === 'initiator') {
-        newContent.application.sources = newContent.application.sources.filter(function (baseSource) {
-
-
-            // if there's a msid, ignore it because its not recvonly
-            // if (sourceHasMsid(baseSource)) {
-            //   return false;
-            // }
-
-
-            // try to find correpsonding source in compareContent if it exists
-            var foundNewRecvonlySource = false;
-            if (oldContent) {
-                var compareSource = findMatchingSource(baseSource, oldContent.application.sources);
-                // if the source is new or the source is now read only
-                // if(!compareSource || (compareSource && sourceHasMsid(compareSource))) {
-                if (!compareSource && oldContent.senders === 'both') {
-                    foundNewRecvonlySource = true;
-                }
-            } else {
-                foundNewRecvonlySource = true;
-            }
-            return foundNewRecvonlySource;
-        });
-    }
-    // remove source groups not related to this stream
-    if (newContent.application.sourceGroups) {
-        newContent.application.sourceGroups = newContent.application.sourceGroups.filter(function (group) {
-            var found = false;
-            for (var i = 0; i < newContent.application.sources.length; i++) {
-                if (newContent.application.sources[i].ssrc === group.sources[0]) {
-                    found = true;
-                    break;
-                }
-            }
-            return found;
-        });
-    }
-    return newContent.application.sources.length;
-
-};
-
-
-// filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
-// (not in compareContent sources) or that have a corresponding source in compareContent that has an msid (indicating)
-// that the source changed from recvonly to sendrecv. If no compareContent is passed in then it will filter the
-// content block to any sources without an msid
-// Returns a boolean indicating that there are recvonly sources
-function filterToMatchingRecvonly(baseContent, compareContent) {
-    // if the content is not rtp, ignore it
-    if (baseContent.application.applicationType !== 'rtp') {
-        return;
-    }
-
-    delete baseContent.transport;
-    delete baseContent.application.payloads;
-    delete baseContent.application.headerExtensions;
-    delete baseContent.application.ssrc;
-    baseContent.application.mux = false;
-
-    if (baseContent.application.sources) {
-        baseContent.application.sources = baseContent.application.sources.filter(function (baseSource) {
-            // if there's a msid, ignore it because its not recvonly
-            if (sourceHasMsid(baseSource)) {
-                return false;
-            }
-
-            // try to find correpsonding source in compareContent if it exists
-            var foundNewRecvonlySource = false;
-            if (compareContent) {
-                var compareSource = findMatchingSource(baseSource, compareContent.application.sources);
-                // if the source is new or the source is now read only
-                if(!compareSource || (compareSource && sourceHasMsid(compareSource))) {
-                    foundNewRecvonlySource = true;
-                }
-            } else {
-                foundNewRecvonlySource = true;
-            }
-            return foundNewRecvonlySource;
-        });
-    }
-    // remove source groups not related to this stream
-    if (baseContent.application.sourceGroups) {
-        baseContent.application.sourceGroups = baseContent.application.sourceGroups.filter(function (group) {
-            var found = false;
-            for (var i = 0; i < baseContent.application.sources.length; i++) {
-                if (baseContent.application.sources[i].ssrc === group.sources[0]) {
-                    found = true;
-                    break;
-                }
-            }
-            return found;
-        });
-    }
-    return baseContent.application.sources.length;
-}
 
 function MediaSession(opts) {
     BaseSession.call(this, opts);
@@ -397,11 +258,9 @@ function MediaSession(opts) {
 
 function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
 
-    console.log('jm - queueOfferAnswer jingleDesc', jingleDesc, cb);
 
     self.q.push(function(qCb) {
         function done(err, answer) {
-            console.log('calling qCb()');
             qCb();
             return (err ? cb(err) : cb(null, answer));
         }
@@ -410,7 +269,6 @@ function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
             type: 'offer',
             jingle: jingleDesc
         }, function (err) {
-            console.log('in handle offer callback');
             if (err) {
                 self._log('error', 'Could not create offer for ' + errorMsg);
                 return done(err);
@@ -423,7 +281,6 @@ function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
                 }
 
                 // call the remaing logic in the cb
-                console.log('at end of Queue offer  self.pc.answer ');
                 done(null, answer);
             });
         });
@@ -587,7 +444,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 // leaving here since the source-remove, source-add solution breaks firefox -> chrome
                 // answer.jingle.contents.forEach(filterOutRecvonly);
                 answer.jingle.contents.forEach(changeSendersIfNoMsids);
-                console.log('raw: session accept is ', JSON.stringify(answer.jingle, null, 2));
                 self.send('session-accept', answer.jingle);
 
                 next();
@@ -683,18 +539,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
-            console.log('new local description before filtering ', JSON.stringify(newLocalDescription.contents))
-            // newLocalDescription.contents.forEach( function (content) {
-            //     filterContentSources(content, stream);
-            // });
-            console.log('new local description after filtering ', JSON.stringify(newLocalDescription.contents))
-            const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
-            //   self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
+            self._doShit(oldLocalDescription, newLocalDescription);
 
-            if (answer.jingle) {
-                console.log('wh would be sending source add ', JSON.stringify(answer.jingle, null , 2));
-                // self.send('source-add', answer.jingle);
-            }
             return cb();
         });
 
@@ -729,10 +575,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
         delete desc.groups;
 
-        if (desc.contents.length) {
-            console.log('wh remove this source dewd: ', desc);
-            // this.send('source-remove', desc);
-        }
 
         //end of dead code
 
@@ -745,8 +587,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
-            // self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
+            self._doShit(oldLocalDescription, newLocalDescription);
             cb();
         });
     },
@@ -761,8 +602,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     _doShit: function(oldLocalDescription, newLocalDescription) {
 
 
-        console.log('in start of  do shit oldLocalDescription', oldLocalDescription);
-        console.log('in start of  do shit newLocalDescription', newLocalDescription);
         const oldDescCopy = JSON.parse(JSON.stringify(oldLocalDescription));
         const newDescCopy =  JSON.parse(JSON.stringify(newLocalDescription));
 
@@ -785,81 +624,55 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const sourcesAdded = diffObject.sourcesAdded;
         const sourcesModified = diffObject.sourcesModified;
         const sourcesToAddBack = diffObject.sourcesToAddBack;
-        console.log('passing oldDescCopy to _signalDifferenceiInSources', JSON.stringify(oldDescCopy, null, 2));
-        console.log('passing newDescCopy to _signalDifferenceiInSources', JSON.stringify(newDescCopy, null, 2));
-        this._signalDifferenceiInSources({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription:oldDescCopy, newLocalDescription:newDescCopy, oldContents, newContents });
+        this._signalDifferenceiInSources({sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded,  sourcesModified: sourcesModified,
+            sourcesToAddBack: sourcesToAddBack, oldLocalDescription: oldDescCopy, newLocalDescription: newDescCopy, oldContents: oldContents, newContents: newContents });
 
-        console.log('wh end of do shit')
 
     },
 
-    _signalDifferenceiInSources: function({sourcesRemoved, sourcesAdded,  sourcesModified,  sourcesToAddBack, oldLocalDescription, newLocalDescription, oldContents, newContents }){
+    _signalDifferenceiInSources: function(diffObject){
 
-        console.log('wh start signalDifferenceiInSources  oldContents', JSON.stringify(oldContents, null , 2));
-        console.log('wh start signalDifferenceiInSources  newContents', JSON.stringify(newContents, null , 2));
-
-        console.log('foo2');
-        console.log('wh start signalDifferenceiInSources sourcesRemoved', sourcesRemoved);
-        console.log('wh start signalDifferenceiInSources  sourcesAdded',  sourcesAdded);
-        console.log('wh start signalDifferenceiInSources  sourcesModified', sourcesModified);
-        console.log('wh start signalDifferenceiInSources  sourcesToAddBack', sourcesToAddBack);
-
-
-        const desc = oldLocalDescription;
+        const desc = diffObject.oldLocalDescription;
         delete desc.groups;
 
-        if (sourcesAdded.length) {
-            const new_desc = newLocalDescription;
+        if (diffObject.sourcesAdded.length) {
+
+            const new_desc = diffObject.newLocalDescription;
             delete new_desc.groups;
-            const whContent = getProperSSRCS(newContents, sourcesAdded);
+            const whContent = getProperSSRCS(diffObject.newContents, diffObject.sourcesAdded);
             new_desc.contents = whContent;
-            console.log('in sources added sending source added' , new_desc);
             this.send('source-add', new_desc);
         }
 
-        if (sourcesRemoved.length && !sourcesModified.length) { // to avoid signaling remove twice
-            const whContent = getProperSSRCS(oldContents, sourcesRemoved)
-            desc.contents = whContent
-            console.log('in sources removed sending source remove' , desc);
-            this.send('source-remove', desc)
+        if (diffObject.sourcesRemoved.length && !diffObject.sourcesModified.length) { // to avoid signaling remove twice
+            const whContent = getProperSSRCS(diffObject.oldContents, diffObject.sourcesRemoved);
+            desc.contents = whContent;
+            this.send('source-remove', desc);
         }
 
 
-        if (sourcesModified.length) {
-            const new_desc = newLocalDescription;
+        if (diffObject.sourcesModified.length) {
+            const new_desc = diffObject.newLocalDescription;
 
-            const jmContent = getProperSSRCS(oldContents, sourcesModified);
-            const jmContent2 = getProperSSRCS(newContents, sourcesModified);
+            const jmContent = getProperSSRCS(diffObject.oldContents, diffObject.sourcesModified);
+            const jmContent2 = getProperSSRCS(diffObject.newContents, diffObject.sourcesModified);
 
 
             desc.contents = jmContent;
             new_desc.contents = jmContent2;
             delete desc.groups;
             delete new_desc.groups;
-            // desc.contents.forEach(function(content) {
-            //     content.application.sources.forEach(function(source) {
-            //         source.parameters = source.parameters.filter(function(param) {
-            //             if (param.key === 'msid') {
-            //                 return false;
-            //             }
-            //             return true;
-            //         });
-            //     });
-            // });
 
             const filteredDesc = filterMsidFromRecvonlySources(desc);
             const filteredNewDesc = filterMsidFromRecvonlySources(new_desc);
 
-            console.log('in sources modified sending source remove ', filteredDesc );
-            console.log('in sources modified sending source add ', filteredNewDesc );
-
             this.send('source-remove', filteredDesc);
             this.send('source-add', filteredNewDesc);
         }
-        if (sourcesToAddBack.length) {
-            const new_desc = newLocalDescription;
-            const jmContent = getProperSSRCS(oldContents, sourcesToAddBack);
-            const jmContent2 = getProperSSRCS(newContents, sourcesToAddBack);
+        if (diffObject.sourcesToAddBack.length) {
+            const new_desc = diffObject.newLocalDescription;
+            const jmContent = getProperSSRCS(diffObject.oldContents, diffObject.sourcesToAddBack);
+            const jmContent2 = getProperSSRCS(diffObject.newContents, diffObject.sourcesToAddBack);
 
             console.log('jmContents: ', jmContent, jmContent2);
             desc.contents = jmContent;
@@ -884,81 +697,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             // desc.contents = sourcesToAddBack;
             this.send('source-remove', desc);
             this.send('source-add', new_desc);
-        }
-    },
-
-    _removeRecvOnlySourceIfPresent: function(oldLocalDescription, newLocalDescription) {
-        var desc = oldLocalDescription;
-
-        console.log('_removeRecvOnlySourceIfPresent: ', oldLocalDescription, newLocalDescription);
-
-        // filter to only sources that changed from recvonly to sendrecv
-        desc.contents = desc.contents.filter(function(oldContent) {
-
-            if (oldContent.application.applicationType === 'rtp'
-                && oldContent.application.sources
-                && oldContent.application.sources.length) {
-                var newContent = findMatchingContentBlock(oldContent, newLocalDescription);
-                console.log('oC sender: ' + oldContent.senders + ' nC sender: ' + newContent.senders)
-                // if (oldContent.senders === 'both' && newContent.senders === 'both') {
-                //   return false;
-                // }
-                // the filter function handles the case where oldContent is null
-                return filterToMatchingRecvonly(oldContent, newContent);
-            }
-        });
-        delete desc.groups;
-        if (desc.contents.length > 0) {
-            console.log('_removeRecvOnlySourceIfPresent found content remove', desc.contents.length);
-            // remove msids
-            desc.contents.forEach(function(content) {
-                content.application.sources.forEach(function(source) {
-                    source.parameters = source.parameters.filter(function(param) {
-                        if (param.key === 'msid') {
-                            return false;
-                        }
-                        return true;
-                    });
-                });
-            })
-            console.log('jm send sr');
-            this.send('source-remove', desc);
-        }
-        else {
-            console.log('_removeRecvOnlySourceIfPresent no recv-only content to remove');
-        }
-    },
-
-    _addRecvOnlySourceIfNotPresent: function(oldLocalDescription, newLocalDescription) {
-        var desc = newLocalDescription;
-
-        // filter to only sources that changed from recvonly to sendrecv
-        desc.contents = desc.contents.filter(function(newContent) {
-            if (newContent.application.applicationType === 'rtp'
-                && newContent.application.media === 'video'
-                && newContent.application.sources
-                && newContent.application.sources.length) {
-                var oldContent = findMatchingContentBlock(newContent, oldLocalDescription);
-                // the filter function handles the case where oldContent is null
-                return filterAddRecvOnlyIfNotPresent(newContent, oldContent);
-                // return filterToMatchingRecvonly(newContent, oldContent);
-            }
-        });
-        delete desc.groups;
-        if (desc.contents.length > 0) {
-            // remove msids
-            desc.contents.forEach(function(content) {
-                content.application.sources.forEach(function(source) {
-                    source.parameters = source.parameters.filter(function(param) {
-                        if (param.key === 'msid') {
-                            return false;
-                        }
-                        return true;
-                    });
-                });
-            })
-
-            this.send('source-add', desc);
         }
     },
 
@@ -1184,7 +922,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         });
 
         var errorMsg = 'adding new stream source';
-        console.log('wh in onSourceAdd triggering queueOfferAnswer');
         var oldLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
         queueOfferAnswer(self, errorMsg, newDesc, function(err) {
             if (err) {
@@ -1197,10 +934,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 delete content.application.payloads;
                 delete content.application.headerExtensions;
             })
-            console.log('deleting content in new local desc')
 
             const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription, true);
-            // self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
@@ -1278,7 +1013,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
             const newSsrcs = self._doShit(oldLocalDescription, newLocalDescription);
 
-            // self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
             return cb();
         });
     },
