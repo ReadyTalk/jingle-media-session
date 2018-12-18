@@ -95,21 +95,18 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                 const newContentHasMsid = sourceHasMsid(sourceMap[oldContents[i].application.sources[j].ssrc].source);
                 const newContentSourceDirection = sourceMap[oldContents[i].application.sources[j].ssrc].direction;
 
-                if (newContentHasMsid) {
-                    if ((newContentSourceDirection !== oldContentSourceDirection) || (oldContentHasMsid !== newContentHasMsid)) {
-                        delete oldContents[i].transport;
-                        delete oldContents[i].application.payloads;
-                        sourcesModified.push(oldContents[i].application.sources[j].ssrc);
-                    }
+                if ((newContentSourceDirection !== oldContentSourceDirection) || (oldContentHasMsid !== newContentHasMsid)) {
+                    delete oldContents[i].transport;
+                    delete oldContents[i].application.payloads;
+                    sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                 }
             }
             delete sourceMap[oldContents[i].application.sources[j].ssrc];
         }
     }
-    // remaning sources in map are new
     const sourcesAdded = Object.keys(sourceMap);
 
-    return { sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded, sourcesModified: sourcesModified };
+    return { sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded, sourcesModified: sourcesModified};
 }
 
 
@@ -549,7 +546,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         const oldDescCopy = JSON.parse(JSON.stringify(oldLocalDescription));
         const newDescCopy =  JSON.parse(JSON.stringify(newLocalDescription));
 
-
         var diffObject = generateDifferenceOfSources(oldDescCopy, newDescCopy);
 
         this._signalDifferenceiInSources({sourcesRemoved: diffObject.sourcesRemoved, sourcesAdded: diffObject.sourcesAdded,  sourcesModified: diffObject.sourcesModified,
@@ -822,7 +818,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 delete content.application.headerExtensions;
             })
 
-            const newSsrcs = self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription, true);
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription, true);
             return cb();
         });
     },
@@ -897,7 +893,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 return cb({condition: 'general-error'});
             }
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            const newSsrcs = self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
 
             return cb();
         });
