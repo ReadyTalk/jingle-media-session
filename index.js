@@ -58,7 +58,7 @@ function filterMsidFromRecvonlySources(description) {
 }
 
 function getRtpContentsWithSources(content) {
-    return content.application.applicationType === 'rtp'
+    return content && content.application && content.application.applicationType === 'rtp'
         && content.application.sources
         && content.application.sources.length;
 }
