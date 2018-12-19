@@ -57,15 +57,15 @@ function filterMsidFromRecvonlySources(description) {
     return description;
 }
 
-function getContent(content) {
+function getRtpContentsWithSources(content) {
     return content.application.applicationType === 'rtp'
         && content.application.sources
         && content.application.sources.length;
 }
 
 function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
-    const oldContents = oldLocalDescription.contents.filter(getContent);
-    const newContents = newLocalDescription.contents.filter(getContent);
+    const oldContents = oldLocalDescription.contents.filter(getRtpContentsWithSources);
+    const newContents = newLocalDescription.contents.filter(getRtpContentsWithSources);
 
     const sourceMap = {};
     const sourcesRemoved = [];
@@ -96,8 +96,6 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                 const newContentSourceDirection = sourceMap[oldContents[i].application.sources[j].ssrc].direction;
 
                 if ((newContentSourceDirection !== oldContentSourceDirection) || (oldContentHasMsid !== newContentHasMsid)) {
-                    delete oldContents[i].transport;
-                    delete oldContents[i].application.payloads;
                     sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                 }
             }
@@ -111,7 +109,7 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
 
 
 
-function getProperSSRCS(contents, ssrcList) {
+function getCleanedContentBlockRelatedToSSRCS(contents, ssrcList) {
     const properContents = [];
     for (var i = 0; i < contents.length; i++) {
         const filteredSsrcs =
@@ -383,9 +381,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 }
 
                 answer.jingle.contents.forEach(filterUnusedLabels);
-                // this isn't needed current because we are signaling a source-remove and then source-add when adding a stream
-                // leaving here since the source-remove, source-add solution breaks firefox -> chrome
-                // answer.jingle.contents.forEach(filterOutRecvonly);
                 answer.jingle.contents.forEach(changeSendersIfNoMsids);
                 self.send('session-accept', answer.jingle);
 
@@ -465,20 +460,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 self._log('error', 'Could not create offer for ' + errorMsg);
                 return cb(err);
             }
-
-
-            //should be dead code just wanted to get tests working before deleting
-            answer.jingle.contents.forEach(function (content) {
-                filterContentSources(content, stream);
-            });
-            answer.jingle.contents = answer.jingle.contents.filter(function (content) {
-                return content.application.applicationType === 'rtp'
-                    && content.application.sources
-                    && content.application.sources.length;
-            });
-            delete answer.jingle.groups;
-            //end of dead code
-
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
             self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
@@ -505,20 +486,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             self.constraints = renegotiate;
         }
 
-
-        //should be dead code just wanted to get tests working before deleting
-        var desc = this.pc.localDescription;
-        desc.contents.forEach(function (content) {
-            filterContentSources(content, stream);
-        });
-        desc.contents = desc.contents.filter(function (content) {
-            return content.application.applicationType === 'rtp' && content.application.sources && content.application.sources.length;
-        });
-        delete desc.groups;
-
-
-        //end of dead code
-
         this.pc.removeStream(stream);
 
         var errorMsg = 'removing stream';
@@ -541,41 +508,38 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
     // Justin's new functions
     _determineDifferencesAndSignal: function(oldLocalDescription, newLocalDescription) {
-
-
         const oldDescCopy = JSON.parse(JSON.stringify(oldLocalDescription));
         const newDescCopy =  JSON.parse(JSON.stringify(newLocalDescription));
-
-        var diffObject = generateDifferenceOfSources(oldDescCopy, newDescCopy);
-
-        this._signalDifferenceiInSources({sourcesRemoved: diffObject.sourcesRemoved, sourcesAdded: diffObject.sourcesAdded,  sourcesModified: diffObject.sourcesModified,
+        const diffObject = generateDifferenceOfSources(oldDescCopy, newDescCopy);
+        this._signalDifferenceInSources({sourcesRemoved: diffObject.sourcesRemoved, sourcesAdded: diffObject.sourcesAdded,  sourcesModified: diffObject.sourcesModified,
              oldLocalDescription: oldDescCopy, newLocalDescription: newDescCopy });
     },
 
-    _signalDifferenceiInSources: function(diffObject){
-        const oldContents = diffObject.oldLocalDescription.contents.filter(getContent);
-        const newContents = diffObject.newLocalDescription.contents.filter(getContent);
+    _signalDifferenceInSources: function(diffObject){
+        const oldContents = diffObject.oldLocalDescription.contents.filter(getRtpContentsWithSources);
+        const newContents = diffObject.newLocalDescription.contents.filter(getRtpContentsWithSources);
         delete diffObject.oldLocalDescription.groups;
         delete diffObject.newLocalDescription.groups;
 
         if (diffObject.sourcesAdded.length) {
-            diffObject.newLocalDescription.contents = getProperSSRCS(newContents, diffObject.sourcesAdded);
+            diffObject.newLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(newContents, diffObject.sourcesAdded);
+            const filteredNewDesc = filterMsidFromRecvonlySources(diffObject.newLocalDescription);
             this._log('info', 'sending source add', diffObject.newLocalDescription);
-            this.send('source-add', diffObject.newLocalDescription);
+            this.send('source-add', filteredNewDesc);
         }
 
-        if (diffObject.sourcesRemoved.length && !diffObject.sourcesModified.length) { // to avoid signaling remove twice
-            diffObject.oldLocalDescription.contents = getProperSSRCS(oldContents, diffObject.sourcesRemoved);
+        if (diffObject.sourcesRemoved.length) {
+            diffObject.oldLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(oldContents, diffObject.sourcesRemoved);
+            const filteredDesc = filterMsidFromRecvonlySources(diffObject.oldLocalDescription);
             this._log('info', 'sending source remove', diffObject.oldLocalDescription);
-            this.send('source-remove', diffObject.oldLocalDescription);
+            this.send('source-remove', filteredDesc);
         }
 
         if (diffObject.sourcesModified.length) {
-            diffObject.oldLocalDescription.contents = getProperSSRCS(oldContents, diffObject.sourcesModified);
-            diffObject.newLocalDescription.contents =  getProperSSRCS(newContents, diffObject.sourcesModified);;
+            diffObject.oldLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(oldContents, diffObject.sourcesModified);
+            diffObject.newLocalDescription.contents =  getCleanedContentBlockRelatedToSSRCS(newContents, diffObject.sourcesModified);;
             const filteredDesc = filterMsidFromRecvonlySources(diffObject.oldLocalDescription);
             const filteredNewDesc = filterMsidFromRecvonlySources(diffObject.newLocalDescription);
-
             this._log('info', 'sending source remove', filteredDesc);
             this._log('info', 'sending source add', filteredNewDesc);
             this.send('source-remove', filteredDesc);
@@ -812,12 +776,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            newLocalDescription.contents.forEach( function(content) {
-                delete content.transport;
-                delete content.application.payloads;
-                delete content.application.headerExtensions;
-            })
-
             self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription, true);
             return cb();
         });
