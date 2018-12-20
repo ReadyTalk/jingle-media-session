@@ -1,9 +1,11 @@
+
+// can add and remove stream but doing so every other time you publish it has an error.
+
 var util = require('util');
 var extend = require('extend-object');
 var BaseSession = require('jingle-session');
 var RTCPeerConnection = require('rtcpeerconnection');
 var queue = require('queue');
-
 
 function filterContentSources(content, stream) {
     if (content.application.applicationType !== 'rtp') {
@@ -18,11 +20,13 @@ function filterContentSources(content, stream) {
         content.application.sources = content.application.sources.filter(function (source) {
             // if there's no msid, ignore it
             if (source.parameters.length < 2) {
-              return false;
+                return false;
             }
-            return (stream.id === source.parameters[1].value.split(' ')[0] || stream.label === source.parameters[1].value.split(' ')[0]);
+            return (stream.id === source.parameters[1].value.split(' ')[0]
+                || stream.label === source.parameters[1].value.split(' ')[0]);
         });
     }
+
     // remove source groups not related to this stream
     if (content.application.sourceGroups) {
         content.application.sourceGroups = content.application.sourceGroups.filter(function (group) {
@@ -38,6 +42,93 @@ function filterContentSources(content, stream) {
     }
 }
 
+function filterMsidFromRecvonlySources(description) {
+    description.contents.forEach(function(content) {
+        content.application.sources.forEach(function(source) {
+            source.parameters = source.parameters.filter(function(param) {
+                if (param.key === 'msid' && (description.senders ==='initiator' || description.senders ==='none')) {
+                    return false;
+                }
+                return true;
+            });
+        });
+    });
+
+    return description;
+}
+
+function getRtpContentsWithSources(content) {
+    return content && content.application && content.application.applicationType === 'rtp'
+        && content.application.sources
+        && content.application.sources.length;
+}
+
+function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
+    const oldContents = oldLocalDescription.contents.filter(getRtpContentsWithSources);
+    const newContents = newLocalDescription.contents.filter(getRtpContentsWithSources);
+
+    const sourceMap = {};
+    const sourcesRemoved = [];
+    const sourcesModified = [];
+
+    //creating map of sources and directions
+    for (var i = 0; i < newContents.length; i++) {
+        for(var j = 0; j < newContents[i].application.sources.length; j++) {
+            sourceMap[newContents[i].application.sources[j].ssrc] = {
+                source: newContents[i].application.sources[j],
+                direction: newContents[i].senders,
+            };
+        }
+    };
+
+
+    for (var i = 0; i < oldContents.length; i++) {
+        for(var j = 0; j < oldContents[i].application.sources.length; j++) {
+            if (!sourceMap[oldContents[i].application.sources[j].ssrc]) {
+                // this IS a removed ssource
+                sourcesRemoved.push(oldContents[i].application.sources[j].ssrc);
+            }
+            else {
+                // this is a possible modified source
+                const oldContentHasMsid = sourceHasMsid(oldContents[i].application.sources[j]);
+                const oldContentSourceDirection = oldContents[i].senders;
+                const newContentHasMsid = sourceHasMsid(sourceMap[oldContents[i].application.sources[j].ssrc].source);
+                const newContentSourceDirection = sourceMap[oldContents[i].application.sources[j].ssrc].direction;
+
+                if ((newContentSourceDirection !== oldContentSourceDirection) || (oldContentHasMsid !== newContentHasMsid)) {
+                    sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                }
+            }
+            delete sourceMap[oldContents[i].application.sources[j].ssrc];
+        }
+    }
+    const sourcesAdded = Object.keys(sourceMap);
+
+    return { sourcesRemoved: sourcesRemoved, sourcesAdded: sourcesAdded, sourcesModified: sourcesModified};
+}
+
+
+
+function getCleanedContentBlockRelatedToSSRCS(contents, ssrcList) {
+    const properContents = [];
+    for (var i = 0; i < contents.length; i++) {
+        const filteredSsrcs =
+            contents[i].application.sources.filter(function(source) {
+                return ssrcList.indexOf(source.ssrc) > -1;
+            });
+
+        if (filteredSsrcs.length) {
+            contents[i].application.sources = filteredSsrcs;
+            delete contents[i].transport;
+            delete contents[i].application.ssrc;
+            delete contents[i].application.payloads;
+            contents[i].application.mux = false;
+            delete contents[i].application.headerExtensions;
+            properContents.push(contents[i]);
+        }
+    }
+    return properContents;
+}
 
 function filterUnusedLabels(content) {
     // Remove mslabel and label ssrc-specific attributes
@@ -47,18 +138,6 @@ function filterUnusedLabels(content) {
             return !(parameter.key === 'mslabel' || parameter.key === 'label');
         });
     });
-}
-
-function findMatchingContentBlock(content, jingleDescription) {
-    var contents = jingleDescription.contents || [];
-    var matchingContents = contents.filter(function (compareContent) {
-        return content.name === compareContent.name;
-    });
-    // intentionally returns null if more than one is matched as that shouldn't normally happen
-    if (matchingContents.length === 1) {
-        return matchingContents[0];
-    }
-    return null;
 }
 
 function findMatchingSource(baseSource, compareSources) {
@@ -89,59 +168,6 @@ function changeSendersIfNoMsids(content) {
     }
 }
 
-// filters the sources in baseContent to only include sources which don't have an msid (recvonly) and are new
-// (not in compareContent sources) or that have a corresponding source in compareContent that has an msid (indicating)
-// that the source changed from recvonly to sendrecv. If no compareContent is passed in then it will filter the 
-// content block to any sources without an msid
-// Returns a boolean indicating that there are recvonly sources
-function filterToMatchingRecvonly(baseContent, compareContent) {
-    // if the content is not rtp, ignore it
-    if (baseContent.application.applicationType !== 'rtp') {
-        return;
-    }
-
-    delete baseContent.transport;
-    delete baseContent.application.payloads;
-    delete baseContent.application.headerExtensions;
-    delete baseContent.application.ssrc;
-    baseContent.application.mux = false;
-
-    if (baseContent.application.sources) {
-        baseContent.application.sources = baseContent.application.sources.filter(function (baseSource) {
-            // if there's a msid, ignore it because its not recvonly
-            if (sourceHasMsid(baseSource)) {
-              return false;
-            }
-
-            // try to find correpsonding source in compareContent if it exists
-            var foundNewRecvonlySource = false;
-            if (compareContent) {
-                var compareSource = findMatchingSource(baseSource, compareContent.application.sources);
-                // if the source is new or the source is now read only
-                if(!compareSource || (compareSource && sourceHasMsid(compareSource))) {
-                    foundNewRecvonlySource = true;
-                }
-            } else {
-                foundNewRecvonlySource = true;
-            }
-            return foundNewRecvonlySource;
-        });
-    }
-    // remove source groups not related to this stream
-    if (baseContent.application.sourceGroups) {
-        baseContent.application.sourceGroups = baseContent.application.sourceGroups.filter(function (group) {
-            var found = false;
-            for (var i = 0; i < baseContent.application.sources.length; i++) {
-                if (baseContent.application.sources[i].ssrc === group.sources[0]) {
-                    found = true;
-                    break;
-                }
-            }
-            return found;
-        });
-    }
-    return baseContent.application.sources.length;
-}
 
 function MediaSession(opts) {
     BaseSession.call(this, opts);
@@ -152,8 +178,8 @@ function MediaSession(opts) {
     }, opts.constraints || {});
 
     this.q = queue({
-      autostart: true,
-      concurrency: 1
+        autostart: true,
+        concurrency: 1
     });
 
     this.pc.on('ice', this.onIceCandidate.bind(this, opts));
@@ -172,78 +198,80 @@ function MediaSession(opts) {
 
 
 function queueOfferAnswer(self, errorMsg, jingleDesc, cb) {
-  self.q.push(function(qCb) {
-    function done(err, answer) {
-      qCb();
-      return (err ? cb(err) : cb(null, answer));
-    }
 
-    self.pc.handleOffer({
-      type: 'offer',
-      jingle: jingleDesc
-    }, function (err) {
-      if (err) {
-        self._log('error', 'Could not create offer for ' + errorMsg);
-        return done(err);
-      }
 
-      self.pc.answer(self.constraints, function (err, answer) {
-        if (err) {
-          self._log('error', 'Could not create answer for ' + errorMsg);
-          return done(err);
+    self.q.push(function(qCb) {
+        function done(err, answer) {
+            qCb();
+            return (err ? cb(err) : cb(null, answer));
         }
 
-        // call the remaing logic in the cb
-        done(null, answer);
-      });
+        self.pc.handleOffer({
+            type: 'offer',
+            jingle: jingleDesc
+        }, function (err) {
+            if (err) {
+                self._log('error', 'Could not create offer for ' + errorMsg);
+                return done(err);
+            }
+
+            self.pc.answer(self.constraints, function (err, answer) {
+                if (err) {
+                    self._log('error', 'Could not create answer for ' + errorMsg);
+                    return done(err);
+                }
+
+                // call the remaing logic in the cb
+                done(null, answer);
+            });
+        });
     });
-  });
 }
 
 
 function queueOffer(self, errorMsg, jingleDesc, cb) {
-  self.q.push(function(qCb) {
-    function done(err) {
-      qCb();
-      return (err ? cb(err) : cb(null));
-    }
+    self.q.push(function(qCb) {
+        function done(err) {
+            qCb();
+            return (err ? cb(err) : cb(null));
+        }
 
-    self.pc.handleOffer({
-      type: 'offer',
-      jingle: jingleDesc
-    }, function (err) {
-      if (err) {
-        self._log('error', errorMsg);
-        return done(err);
-      }
+        self.pc.handleOffer({
+            type: 'offer',
+            jingle: jingleDesc
+        }, function (err) {
+            if (err) {
+                self._log('error', errorMsg);
+                return done(err);
+            }
 
-      // call the remaing logic in the cb
-      done();
+            // call the remaing logic in the cb
+            done();
+        });
     });
-  });
 }
 
 
 function queueAnswer(self, errorMsg, jingleDesc, cb) {
-  self.q.push(function(qCb) {
-    function done(err, answer) {
-      qCb();
-      return (err ? cb(err) : cb(null, answer));
-    }
+    self.q.push(function(qCb) {
+        function done(err, answer) {
+            qCb();
+            return (err ? cb(err) : cb(null, answer));
+        }
 
-    self.pc.handleAnswer({
-      type: 'answer',
-      jingle: jingleDesc
-    }, function (err) {
-      if (err) {
-        self._log('error', errorMsg);
-        return done(err);
-      }
+        self.pc.handleAnswer({
+            type: 'answer',
+            jingle: jingleDesc
+        }, function (err) {
+            if (err) {
+                self._log('error', errorMsg);
+                return done(err);
+            }
 
-      // call the remaing logic in the cb
-      done();
+            // call the remaing logic in the cb
+            done();
+        });
     });
-  });
 }
 
 
@@ -287,39 +315,39 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         this.pc.isInitiator = true;
         self.q.push(function(qCb) {
-          self.pc.offer(offerOptions, function (err, offer) {
-              if (err) {
-                  self._log('error', 'Could not create WebRTC offer', err);
-                  return self.end('failed-application', true);
-              }
+            self.pc.offer(offerOptions, function (err, offer) {
+                if (err) {
+                    self._log('error', 'Could not create WebRTC offer', err);
+                    return self.end('failed-application', true);
+                }
 
-              // a workaround for missing a=sendonly
-              // https://code.google.com/p/webrtc/issues/detail?id=1553
-              if (offerOptions && offerOptions.mandatory) {
-                  offer.jingle.contents.forEach(function (content) {
-                      var mediaType = content.application.media;
+                // a workaround for missing a=sendonly
+                // https://code.google.com/p/webrtc/issues/detail?id=1553
+                if (offerOptions && offerOptions.mandatory) {
+                    offer.jingle.contents.forEach(function (content) {
+                        var mediaType = content.application.media;
 
-                      if (!content.description || content.application.applicationType !== 'rtp') {
-                          return;
-                      }
+                        if (!content.description || content.application.applicationType !== 'rtp') {
+                            return;
+                        }
 
-                      if (!offerOptions.mandatory.OfferToReceiveAudio && mediaType === 'audio') {
-                          content.senders = 'initiator';
-                      }
+                        if (!offerOptions.mandatory.OfferToReceiveAudio && mediaType === 'audio') {
+                            content.senders = 'initiator';
+                        }
 
-                      if (!offerOptions.mandatory.OfferToReceiveVideo && mediaType === 'video') {
-                          content.senders = 'initiator';
-                      }
-                  });
-              }
+                        if (!offerOptions.mandatory.OfferToReceiveVideo && mediaType === 'video') {
+                            content.senders = 'initiator';
+                        }
+                    });
+                }
 
-              offer.jingle.contents.forEach(filterUnusedLabels);
+                offer.jingle.contents.forEach(filterUnusedLabels);
 
-              self.send('session-initiate', offer.jingle);
+                self.send('session-initiate', offer.jingle);
 
-              next();
-              qCb();
-          });
+                next();
+                qCb();
+            });
         });
     },
 
@@ -346,23 +374,19 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         self.state = 'active';
 
         self.q.push(function(qCb) {
-          self.pc.answer(self.constraints, function (err, answer) {
-            if (err) {
-              self._log('error', 'Could not create WebRTC answer', err);
-              return self.end('failed-application');
-            }
+            self.pc.answer(self.constraints, function (err, answer) {
+                if (err) {
+                    self._log('error', 'Could not create WebRTC answer', err);
+                    return self.end('failed-application');
+                }
 
-            answer.jingle.contents.forEach(filterUnusedLabels);
-            // this isn't needed current because we are signaling a source-remove and then source-add when adding a stream
-            // leaving here since the source-remove, source-add solution breaks firefox -> chrome
-            // answer.jingle.contents.forEach(filterOutRecvonly);
-            answer.jingle.contents.forEach(changeSendersIfNoMsids);
+                answer.jingle.contents.forEach(filterUnusedLabels);
+                answer.jingle.contents.forEach(changeSendersIfNoMsids);
+                self.send('session-accept', answer.jingle);
 
-            self.send('session-accept', answer.jingle);
-
-            next();
-            qCb();
-          });
+                next();
+                qCb();
+            });
         });
     },
 
@@ -429,26 +453,18 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         } else if (typeof renegotiate === 'object') {
             self.constraints = renegotiate;
         }
+
         var errorMsg = 'adding new stream';
         queueOfferAnswer(this, errorMsg, self.pc.remoteDescription, function(err, answer) {
-          if (err) {
-            self._log('error', 'Could not create offer for ' + errorMsg);
-            return cb(err);
-          }
+            if (err) {
+                self._log('error', 'Could not create offer for ' + errorMsg);
+                return cb(err);
+            }
+            var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
 
-          answer.jingle.contents.forEach(function (content) {
-            filterContentSources(content, stream);
-          });
-          answer.jingle.contents = answer.jingle.contents.filter(function (content) {
-            return content.application.applicationType === 'rtp' && content.application.sources && content.application.sources.length;
-          });
-          delete answer.jingle.groups;
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
 
-          var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-          self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
-
-          self.send('source-add', answer.jingle);
-          return cb();
+            return cb();
         });
 
     },
@@ -470,16 +486,6 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             self.constraints = renegotiate;
         }
 
-        var desc = this.pc.localDescription;
-        desc.contents.forEach(function (content) {
-            filterContentSources(content, stream);
-        });
-        desc.contents = desc.contents.filter(function (content) {
-            return content.application.applicationType === 'rtp' && content.application.sources && content.application.sources.length;
-        });
-        delete desc.groups;
-
-        this.send('source-remove', desc);
         this.pc.removeStream(stream);
 
         var errorMsg = 'removing stream';
@@ -489,7 +495,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             }
 
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
             cb();
         });
     },
@@ -498,37 +504,46 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         this.removeStream(stream, true, cb);
     },
 
-    _removeRecvOnlySourceIfPresent: function(oldLocalDescription, newLocalDescription) {
-        var desc = oldLocalDescription;
 
-        // filter to only sources that changed from recvonly to sendrecv
-        desc.contents = desc.contents.filter(function(oldContent) {
-            if (oldContent.application.applicationType === 'rtp' && oldContent.application.sources && oldContent.application.sources.length) {
-                var newContent = findMatchingContentBlock(oldContent, newLocalDescription);
-                // the filter function handles the case where oldContent is null
-                return filterToMatchingRecvonly(oldContent, newContent);
-            }
-        });
-        delete desc.groups;
-        if (desc.contents.length > 0) {
-            this.send('source-remove', desc);
-        }
+
+    // Justin's new functions
+    _determineDifferencesAndSignal: function(oldLocalDescription, newLocalDescription) {
+        const oldDescCopy = JSON.parse(JSON.stringify(oldLocalDescription));
+        const newDescCopy =  JSON.parse(JSON.stringify(newLocalDescription));
+        const diffObject = generateDifferenceOfSources(oldDescCopy, newDescCopy);
+        this._signalDifferenceInSources({sourcesRemoved: diffObject.sourcesRemoved, sourcesAdded: diffObject.sourcesAdded,  sourcesModified: diffObject.sourcesModified,
+             oldLocalDescription: oldDescCopy, newLocalDescription: newDescCopy });
     },
 
-    _addRecvOnlySourceIfNotPresent: function(oldLocalDescription, newLocalDescription) {
-        var desc = newLocalDescription;
+    _signalDifferenceInSources: function(diffObject){
+        const oldContents = diffObject.oldLocalDescription.contents.filter(getRtpContentsWithSources);
+        const newContents = diffObject.newLocalDescription.contents.filter(getRtpContentsWithSources);
+        delete diffObject.oldLocalDescription.groups;
+        delete diffObject.newLocalDescription.groups;
 
-        // filter to only sources that changed from recvonly to sendrecv
-        desc.contents = desc.contents.filter(function(newContent) {
-            if (newContent.application.applicationType === 'rtp' && newContent.application.sources && newContent.application.sources.length) {
-                var oldContent = findMatchingContentBlock(newContent, oldLocalDescription);
-                // the filter function handles the case where oldContent is null
-                return filterToMatchingRecvonly(newContent, oldContent);
-            }
-        });
-        delete desc.groups;
-        if (desc.contents.length > 0) {
-            this.send('source-add', desc);
+        if (diffObject.sourcesAdded.length) {
+            diffObject.newLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(newContents, diffObject.sourcesAdded);
+            const filteredNewDesc = filterMsidFromRecvonlySources(diffObject.newLocalDescription);
+            this._log('info', 'sending source add', diffObject.newLocalDescription);
+            this.send('source-add', filteredNewDesc);
+        }
+
+        if (diffObject.sourcesRemoved.length) {
+            diffObject.oldLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(oldContents, diffObject.sourcesRemoved);
+            const filteredDesc = filterMsidFromRecvonlySources(diffObject.oldLocalDescription);
+            this._log('info', 'sending source remove', diffObject.oldLocalDescription);
+            this.send('source-remove', filteredDesc);
+        }
+
+        if (diffObject.sourcesModified.length) {
+            diffObject.oldLocalDescription.contents = getCleanedContentBlockRelatedToSSRCS(oldContents, diffObject.sourcesModified);
+            diffObject.newLocalDescription.contents =  getCleanedContentBlockRelatedToSSRCS(newContents, diffObject.sourcesModified);;
+            const filteredDesc = filterMsidFromRecvonlySources(diffObject.oldLocalDescription);
+            const filteredNewDesc = filterMsidFromRecvonlySources(diffObject.newLocalDescription);
+            this._log('info', 'sending source remove', filteredDesc);
+            this._log('info', 'sending source add', filteredNewDesc);
+            this.send('source-remove', filteredDesc);
+            this.send('source-add', filteredNewDesc);
         }
     },
 
@@ -550,17 +565,17 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         var errorMsg = 'switching streams';
         queueOfferAnswer(self, errorMsg, this.pc.remoteDescription, function(err, answer) {
-          if (err) {
-            self._log('error', 'Could not create offer for ' + errorMsg);
-            return cb(err);
-          }
+            if (err) {
+                self._log('error', 'Could not create offer for ' + errorMsg);
+                return cb(err);
+            }
 
-          answer.jingle.contents.forEach(function (content) {
-            delete content.transport;
-            delete content.application.payloads;
-          });
-          self.send('source-add', answer.jingle);
-          return err ? cb(err) : cb();
+            answer.jingle.contents.forEach(function (content) {
+                delete content.transport;
+                delete content.application.payloads;
+            });
+            self.send('source-add', answer.jingle);
+            return err ? cb(err) : cb();
         });
     },
 
@@ -641,7 +656,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
         this.pc.isInitiator = false;
         var errorMsg = 'Could not create WebRTC answer';
         queueOffer(this, errorMsg, changes, function(err) {
-          return err ? cb({condition: 'general-error'}) : cb();
+            return err ? cb({condition: 'general-error'}) : cb();
         });
     },
 
@@ -652,11 +667,11 @@ MediaSession.prototype = extend(MediaSession.prototype, {
 
         var errorMsg = 'Could not process WebRTC answer';
         queueAnswer(this, errorMsg, changes, function(err) {
-          if (err) {
-            return cb({condition: 'general-error'});
-          }
-          self.emit('accepted', self);
-          cb();
+            if (err) {
+                return cb({condition: 'general-error'});
+            }
+            self.emit('accepted', self);
+            cb();
         });
     },
 
@@ -709,17 +724,17 @@ MediaSession.prototype = extend(MediaSession.prototype, {
     },
 
     onTransportInfo: function (changes, cb) {
-      var self = this;
-      self.q.push(function(qCb) {
-        function done() {
-          qCb();
-          return cb();
-        }
+        var self = this;
+        self.q.push(function(qCb) {
+            function done() {
+                qCb();
+                return cb();
+            }
 
-        self.pc.processIce(changes, function () {
-          done();
+            self.pc.processIce(changes, function () {
+                done();
+            });
         });
-      });
     },
 
     onSourceAdd: function (changes, cb) {
@@ -759,9 +774,9 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             if (err) {
                 return cb({condition: 'general-error'});
             }
-            
+
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._addRecvOnlySourceIfNotPresent(oldLocalDescription, newLocalDescription);
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription, true);
             return cb();
         });
     },
@@ -836,7 +851,8 @@ MediaSession.prototype = extend(MediaSession.prototype, {
                 return cb({condition: 'general-error'});
             }
             var newLocalDescription = JSON.parse(JSON.stringify(self.pc.localDescription));
-            self._removeRecvOnlySourceIfPresent(oldLocalDescription, newLocalDescription);
+            self._determineDifferencesAndSignal(oldLocalDescription, newLocalDescription);
+
             return cb();
         });
     },
