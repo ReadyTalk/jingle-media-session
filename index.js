@@ -46,7 +46,7 @@ function filterMsidFromRecvonlySources(description) {
     description.contents.forEach(function(content) {
         content.application.sources.forEach(function(source) {
             source.parameters = source.parameters.filter(function(param) {
-                if (param.key === 'msid' && (description.senders ==='initiator' || description.senders ==='none')) {
+                if (param.key === 'msid' && (content.senders ==='initiator' || content.senders ==='none')) {
                     return false;
                 }
                 return true;
