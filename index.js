@@ -177,7 +177,7 @@ function MediaSession(opts) {
     this.pc = new RTCPeerConnection({
         iceServers: opts.iceServers || [],
         useJingle: true,
-        sdpSemantics
+        sdpSemantics: sdpSemantics
     }, opts.constraints || {});
 
     this.q = queue({
