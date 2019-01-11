@@ -172,9 +172,12 @@ function changeSendersIfNoMsids(content) {
 function MediaSession(opts) {
     BaseSession.call(this, opts);
 
+    var sdpSemantics = opts.parent && opts.parent.config && opts.parent.config.sdpSemantics;
+
     this.pc = new RTCPeerConnection({
         iceServers: opts.iceServers || [],
-        useJingle: true
+        useJingle: true,
+        sdpSemantics: sdpSemantics
     }, opts.constraints || {});
 
     this.q = queue({
