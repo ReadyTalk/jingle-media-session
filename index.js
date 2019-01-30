@@ -95,9 +95,17 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                 const newContentHasMsid = sourceHasMsid(sourceMap[oldContents[i].application.sources[j].ssrc].source);
                 const newContentSourceDirection = sourceMap[oldContents[i].application.sources[j].ssrc].direction;
 
-                if ((newContentSourceDirection !== oldContentSourceDirection) || (oldContentHasMsid !== newContentHasMsid)) {
-                    sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                if ((newContentSourceDirection !== oldContentSourceDirection)) {
+                    if (newContentSourceDirection === 'both') {
+                        if (newContentHasMsid) {
+                            sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                        }
+                    }
+                    if (newContentSourceDirection === 'initiator') {
+                        sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                    }
                 }
+
             }
             delete sourceMap[oldContents[i].application.sources[j].ssrc];
         }
