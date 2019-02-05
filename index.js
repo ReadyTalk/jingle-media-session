@@ -102,7 +102,9 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                         }
                     }
                     if (newContentSourceDirection === 'initiator') {
-                        sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                        if (oldContentHasMsid) {
+                            sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                        }
                     }
                 }
 
