@@ -100,8 +100,7 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                         if (newContentHasMsid) {
                             sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                         }
-                    }
-                    if (newContentSourceDirection === 'initiator') {
+                    } else if (newContentSourceDirection === 'initiator') {
                         if (oldContentHasMsid) {
                             sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                         }
