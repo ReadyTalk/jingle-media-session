@@ -555,7 +555,12 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             this._log('info', 'sending source remove', filteredDesc);
             this._log('info', 'sending source add', filteredNewDesc);
             this.send('source-remove', filteredDesc);
-            this.send('source-add', filteredNewDesc);
+            // Hack. Do not send the bridge messages for the same channel too fast.  Remove once
+            // bridge has been fixed
+            var that = this;
+            setTimeout(function() {
+              this.send('source-add', filteredNewDesc);
+            }, 250);
         }
     },
 
