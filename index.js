@@ -559,7 +559,7 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             // bridge has been fixed
             var that = this;
             setTimeout(function() {
-              this.send('source-add', filteredNewDesc);
+              that.send('source-add', filteredNewDesc);
             }, 250);
         }
     },
