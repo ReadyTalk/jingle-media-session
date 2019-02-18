@@ -553,9 +553,14 @@ MediaSession.prototype = extend(MediaSession.prototype, {
             const filteredDesc = filterMsidFromRecvonlySources(diffObject.oldLocalDescription);
             const filteredNewDesc = filterMsidFromRecvonlySources(diffObject.newLocalDescription);
             this._log('info', 'sending source remove', filteredDesc);
-            this._log('info', 'sending source add', filteredNewDesc);
             this.send('source-remove', filteredDesc);
-            this.send('source-add', filteredNewDesc);
+            // Hack. Do not send the bridge messages for the same channel too fast.  Remove once
+            // bridge has been fixed
+            var that = this;
+            setTimeout(function() {
+              that._log('info', 'sending source add', filteredNewDesc);
+              that.send('source-add', filteredNewDesc);
+            }, 250);
         }
     },
 
