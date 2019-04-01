@@ -104,6 +104,12 @@ function generateDifferenceOfSources(oldLocalDescription, newLocalDescription) {
                         if (oldContentHasMsid) {
                             sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                         }
+                    } else if (newContentSourceDirection === 'responder') {
+                        if (newContentHasMsid) {
+                            sourcesModified.push(oldContents[i].application.sources[j].ssrc);
+                        }
+                    } else if (newContentSourceDirection === 'none') {
+                        sourcesModified.push(oldContents[i].application.sources[j].ssrc);
                     }
                 }
 
